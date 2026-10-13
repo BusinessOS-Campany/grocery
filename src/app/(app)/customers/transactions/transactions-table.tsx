@@ -17,6 +17,7 @@ import { DeleteMonthButton } from "./delete-month-button";
 import { ClearAccountButton } from "./clear-account-button";
 import { TxnRowActions } from "./txn-row-actions";
 import { TxnImage } from "@/features/customers/ui/image-view";
+import { mountedHref } from "@/lib/app-url";
 
 export async function TransactionsTable({
   customerId, q, month, monthParam, page,
@@ -40,7 +41,7 @@ export async function TransactionsTable({
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
-        <form className="flex flex-wrap items-center gap-2" action="/customers/transactions">
+        <form className="flex flex-wrap items-center gap-2" action={mountedHref("/customers/transactions")}>
           {customerId && <input type="hidden" name="customerId" value={customerId} />}
           <LiveQueryInput placeholder={t.common.searchPlaceholder} className="w-full sm:w-56" />
           <input
