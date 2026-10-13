@@ -1,6 +1,7 @@
 ﻿import "server-only";
 import { db } from "@/shared/db";
 import { logger } from "@/shared/core/logger";
+import { isFresh } from "@/lib/ttl";
 import { NotificationType } from "@/generated/prisma/client";
 
 /**
@@ -125,13 +126,31 @@ let syncCache: { at: number; promise: Promise<SyncedNotifications> } | null = nu
 
 export function syncNotifications(limit = 25): Promise<SyncedNotifications> {
   const cached = syncCache;
-  if (cached && Date.now() - cached.at < SYNC_TTL_MS) return cached.promise;
+  if (cached && isFresh(cached.at, Date.now(), SYNC_TTL_MS)) return cached.promise;
   const promise: Promise<SyncedNotifications> = doSyncNotifications(limit).catch((err) => {
     if (syncCache?.promise === promise) syncCache = null;
     throw err;
   });
   syncCache = { at: Date.now(), promise };
   return promise;
+}
+
+/**
+ * Bell data for a page render.
+ *
+ * The condition scan behind syncNotifications is ~7 queries over ~800 rows and
+ * must never sit on the navigation critical path: the (app) layout awaits this
+ * on every sidebar click. The render therefore reads the current unread rows —
+ * one indexed query — and lets the scan finish in the background, so the next
+ * navigation picks up anything it derived. Operation events still show up
+ * immediately because listNotifications reads the table directly rather than
+ * the memo, and notify()/markAllRead() stay correct on the very next click.
+ */
+export async function notificationsForBell(limit = 25): Promise<SyncedNotifications> {
+  void syncNotifications(limit).catch((err) => {
+    logger.error("notifications_sync_failed", err);
+  });
+  return listNotifications(limit);
 }
 
 /** Upsert unread notifications for current conditions; returns fresh list. */
@@ -153,34 +172,7 @@ async function doSyncNotifications(limit = 25) {
       });
     }
   }
-  await collapseUnreadDuplicates();
   return listNotifications(limit);
-}
-
-/**
- * The notifications feed shows ONE unread entry per (type, entityId) — the
- * same dedupe the condition scan uses. Operation events (customer txns, sales,
- * receipts…) used to mint a fresh row per call, so a repeated process flooded
- * the bell with identical entries. Collapse existing unread duplicates to the
- * newest row (read history is untouched).
- */
-async function collapseUnreadDuplicates() {
-  const unread = await db.notification.findMany({
-    where: { isRead: false },
-    select: { id: true, type: true, entityId: true, createdAt: true },
-  });
-  const newest = new Map<string, { id: string; at: number }>();
-  for (const n of unread) {
-    const key = `${n.type}:${n.entityId ?? ""}`;
-    const cur = newest.get(key);
-    if (!cur || n.createdAt.getTime() > cur.at) newest.set(key, { id: n.id, at: n.createdAt.getTime() });
-  }
-  const keepIds = new Set([...newest.values()].map((v) => v.id));
-  const dropIds = unread.filter((n) => !keepIds.has(n.id)).map((n) => n.id);
-  if (dropIds.length > 0) {
-    await db.notification.deleteMany({ where: { id: { in: dropIds } } });
-    logger.info("notifications_collapsed", { dropped: dropIds.length });
-  }
 }
 
 export async function listNotifications(limit = 25) {
@@ -217,27 +209,6 @@ export interface NotifyInput {
 export async function notify(input: NotifyInput) {
   syncCache = null; // bell list must include the new event on next read
   try {
-    if (input.entityId) {
-      const existing = await db.notification.findFirst({
-        where: { isRead: false, type: input.type, entityId: input.entityId },
-        orderBy: { createdAt: "desc" },
-        select: { id: true },
-      });
-      if (existing) {
-        // one unread entry per (type, entityId): refresh the newest instead of
-        // minting a flood of identical rows for repeated events on the same entity.
-        await db.notification.update({
-          where: { id: existing.id },
-          data: {
-            title: input.title,
-            body: input.body ?? null,
-            href: input.href ?? null,
-            createdAt: new Date(),
-          },
-        });
-        return;
-      }
-    }
     await db.notification.create({
       data: {
         type: input.type,

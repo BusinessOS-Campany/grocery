@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import type { Dictionary } from "@/shared/i18n";
-import { NAV_GROUPS, navLabel } from "./nav-config";
+import { NAV_GROUPS, navLabel, useNavIntent } from "./nav-config";
 import { GlobalSearch } from "./global-search";
 import { NotificationsBell, type NotificationItem } from "./notifications-bell";
 import { VoiceDictation } from "./voice-dictation";
@@ -39,6 +39,7 @@ function setThemeSafe(theme: string) {
 
 export function Topbar({ t, userName, roleName, permissions, notifications, storeName, aiVoice }: Props) {
   const pathname = usePathname();
+  const nav = useNavIntent();
   const { resolvedTheme, setTheme } = useTheme();
 
   const logout = async () => {
@@ -78,6 +79,11 @@ export function Topbar({ t, userName, roleName, permissions, notifications, stor
                       <li key={item.href}>
                         <Link
                           href={item.href}
+                          prefetch={nav.intent === item.href}
+                          onMouseEnter={() => nav.enter(item.href)}
+                          onMouseLeave={() => nav.leave(item.href)}
+                          onFocus={() => nav.enter(item.href)}
+                          onBlur={() => nav.leave(item.href)}
                           className={`flex items-center gap-2.5 rounded-md px-2 py-2 text-sm ${active ? "bg-accent font-medium" : ""}`}
                         >
                           <Icon className="size-4" />

@@ -140,76 +140,30 @@ export async function getCache<T>(key: string): Promise<T | null> {
 export interface FlushResult {
   synced: number;
   failed: number;
-  dropped: number;
 }
-
-/**
- * Server-side business rejections a retry can never fix: bad/absent payload,
- * missing row, insufficient stock, or a frozen / over-limit / zero balance
- * customer. Retrying them forever keeps the failed-sync toast firing and pins
- * the outbox, so the item is dropped instead — the operator re-enters it if it
- * still matters. Response-loss / server faults (INTERNAL_ERROR, network) are
- * NOT listed here and keep retrying.
- */
-const PERMANENT_ERROR_CODES = new Set([
-  "VALIDATION_ERROR", "INSUFFICIENT_STOCK", "CREDIT_LIMIT_EXCEEDED",
-  "BALANCE_FROZEN", "NOT_FOUND", "FORBIDDEN", "UNAUTHORIZED", "IN_USE", "DUPLICATE",
-]);
 
 /** Replays queued mutations oldest-first through their real server actions. */
 export async function flushOutbox(): Promise<FlushResult> {
   const items = await listOutbox();
   let synced = 0;
   let failed = 0;
-  let dropped = 0;
 
   for (const item of items) {
     try {
       let ok = false;
-      let permanent = false;
-      const rawPayload = (item.payload ?? {}) as Record<string, unknown>;
-      // Legacy queued items predate clientId — stamp a stable key so replays
-      // are idempotent even for an item whose response was lost after commit.
-      const clientId = String(rawPayload.clientId ?? "") || item.id;
       if (item.kind === "SALE") {
         const { checkoutAction } = await import("@/features/sales/actions");
-        const res = await checkoutAction({ ...rawPayload, clientId } as Parameters<typeof checkoutAction>[0]);
+        const res = await checkoutAction(item.payload as Parameters<typeof checkoutAction>[0]);
         ok = res.ok;
-        if (!res.ok && PERMANENT_ERROR_CODES.has(res.error.code)) permanent = true;
       } else {
-        const { recordCustomerTxnAction, attachCustomerTxnImageAction, matchCustomerTxnAction } =
-          await import("@/features/customers/actions");
-        const { imageData, imageMime, ...txnPayload } = rawPayload;
-        // Legacy queued items predate idempotency keys. Replaying them with a
-        // fresh key would mint a brand-new row even though the original was
-        // already committed — that's how old "auto-added" duplicates resurfaced.
-        // If an identical ledger entry already exists, this is a duplicate:
-        // drop it without calling the server again.
-        if (!rawPayload.clientId) {
-          const match = (await matchCustomerTxnAction(txnPayload)) as
-            | { ok: true; data: { id: string } | null }
-            | { ok: false };
-          if (match.ok && match.data?.id) {
-            await removeOutbox(item.id);
-            synced += 1;
-            continue;
-          }
-        }
-        const res = (await recordCustomerTxnAction({ ...txnPayload, clientId })) as
+        const { recordCustomerTxnAction, attachCustomerTxnImageAction } = await import("@/features/customers/actions");
+        const raw = (item.payload ?? {}) as Record<string, unknown>;
+        const { imageData, imageMime, ...txnPayload } = raw;
+        const res = (await recordCustomerTxnAction(txnPayload)) as
           | { ok: true; data: { id: string } }
-          | { ok: false; error?: { code?: string } };
-        if (!res.ok && res.error?.code === "DELETED_KEY") {
-          // The row this item created was deliberately deleted (duplicate
-          // purge / manual delete / clear account). Its key is tombstoned, so
-          // replaying it forever would only resurrect a row the user removed —
-          // drop the item instead of retrying it.
-          await removeOutbox(item.id);
-          synced += 1;
-          continue;
-        }
+          | { ok: false };
         if (!res.ok) {
-          ok = false; // payment failed — stays queued for retry unless permanent
-          if (res.error?.code && PERMANENT_ERROR_CODES.has(res.error.code)) permanent = true;
+          ok = false; // payment failed — stays queued for retry
         } else if (imageData) {
           const attach = (await attachCustomerTxnImageAction(res.data.id, {
             dataUrl: String(imageData),
@@ -226,11 +180,6 @@ export async function flushOutbox(): Promise<FlushResult> {
       if (ok) {
         await removeOutbox(item.id);
         synced += 1;
-      } else if (permanent) {
-        // Unrecoverable business rejection — drop it so it stops pinning the
-        // queue and re-firing the failure toast on every automatic retry.
-        await removeOutbox(item.id);
-        dropped += 1;
       } else {
         failed += 1;
         await bumpAttempts(item.id);
@@ -244,5 +193,5 @@ export async function flushOutbox(): Promise<FlushResult> {
   }
 
   if (items.length > 0) notifyListeners(await countOutbox());
-  return { synced, failed, dropped };
+  return { synced, failed };
 }

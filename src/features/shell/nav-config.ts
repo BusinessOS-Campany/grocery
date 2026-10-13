@@ -5,6 +5,7 @@ import {
   CreditCard, LineChart, Wallet, UserCog, KeyRound, ScrollText, Settings2,
   Store, Globe2, ShieldCheck, DatabaseBackup, Snowflake, type LucideIcon,
 } from "lucide-react";
+import { useState } from "react";
 import type { Dictionary } from "@/shared/i18n";
 
 export type NavLabelKey = keyof Dictionary["nav"] | keyof Dictionary["reports"];
@@ -29,6 +30,35 @@ export function navLabel(nav: Dictionary["nav"], reports: Dictionary["reports"],
   const r = reports as Record<string, unknown>;
   const resolved = n[key] ?? r[key];
   return typeof resolved === "string" ? resolved : String(key);
+}
+
+/**
+ * Tracks which nav row the pointer or keyboard focus is on.
+ *
+ * `<Link>` prefetches on viewport entry and on hover, and `prefetch={false}`
+ * turns off both — there is no hover-only mode in the App Router, and
+ * `router.prefetch()` does not help because the router discards a prefetched
+ * entry for a link marked `prefetch={false}`. Holding `prefetch` off until the
+ * row is actually aimed at gets Next's own prefetcher (the one whose entry the
+ * click reads) to run at the moment of intent, and only for that one row.
+ *
+ * Measured on the org copy of this system through the platform proxy, leaving
+ * prefetch on for the whole sidebar fired 41 RSC requests on one page load and
+ * held the connection for ~6.5s past interactivity on a ~550ms link, so the
+ * click the user actually made queued behind them.
+ */
+export function useNavIntent(): {
+  /** The href currently under the pointer or focus, or null. */
+  intent: string | null;
+  enter: (href: string) => void;
+  leave: (href: string) => void;
+} {
+  const [intent, setIntent] = useState<string | null>(null);
+  return {
+    intent,
+    enter: setIntent,
+    leave: (href: string) => setIntent((current) => (current === href ? null : current)),
+  };
 }
 
 export const NAV_GROUPS: NavGroup[] = [

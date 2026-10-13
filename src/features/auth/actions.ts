@@ -37,7 +37,13 @@ export async function logoutAction() {
       });
     }
     await destroyCurrentSession();
-    return ok({ redirect: "/login" });
+    // The platform's sign-in, not this app's `/login`. The topbar assigns this
+    // with `window.location.href`, which escapes the mount point the app is
+    // served under, so a bare `/login` resolves to the origin root — where the
+    // platform has no such route and the user lands on a 404. The platform
+    // session outlives this one, and `/signin` renders its form unconditionally
+    // instead of bouncing a signed-in visitor back into the tenant.
+    return ok({ redirect: "/signin" });
   });
 }
 

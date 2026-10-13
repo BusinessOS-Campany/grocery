@@ -23,11 +23,10 @@ export default async function FinancialSummaryPage({ searchParams }: PageProps<"
   ];
 
   return (
-    <div className="space-y-4" id="pdf-paper">
-      <ReportHeader
+    <ReportHeader
         title={t.reports.financialSummary} basePath="/reports/summary" family="profit"
         fromISO={range.fromISO} toISO={range.toISO}
-      />
+      >
       <SummaryCards items={[
         { label: t.reports.netProfit, value: formatMoney(p.netProfit, locale), accent: true },
         { label: t.reports.margin, value: `${p.marginPercent}%` },
@@ -115,6 +114,6 @@ export default async function FinancialSummaryPage({ searchParams }: PageProps<"
           </TableBody>
         </Table>
       </ReportSection>
-    </div>
+    </ReportHeader>
   );
 }

@@ -1,7 +1,6 @@
 import "server-only";
 import { db } from "@/shared/db";
 import { Prisma } from "@/generated/prisma/client";
-import { withIdTiebreak } from "@/shared/core/orderby";
 
 export interface AuditFilters {
   userId?: string;
@@ -35,7 +34,7 @@ export async function listAudit(filters: AuditFilters) {
     db.auditLog.findMany({
       where,
       include: { user: { select: { username: true, fullName: true, fullNameAr: true } } },
-      orderBy: withIdTiebreak({ createdAt: "desc" }),
+      orderBy: { createdAt: "desc" },
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),

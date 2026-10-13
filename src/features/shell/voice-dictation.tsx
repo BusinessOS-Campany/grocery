@@ -5,6 +5,7 @@ import { Loader2, Mic } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { mountedHref } from "@/lib/app-url";
 
 /**
  * Voice input for any focused field.
@@ -144,7 +145,7 @@ export function VoiceDictation({ aiMode = false }: { aiMode?: boolean }) {
         // Global dictation targets arbitrary fields (often product/customer
         // search), so keep the store-vocabulary bias.
         form.append("context", "auto");
-        const res = await fetch("/api/ai/transcribe", { method: "POST", body: form });
+        const res = await fetch(mountedHref("/api/ai/transcribe"), { method: "POST", body: form });
         const data = (await res.json().catch(() => null)) as { text?: string; error?: string } | null;
         if (res.ok && data?.text) applyToTarget(data.text);
         else if (data?.error === "NO_ARABIC_SPEECH") toast.error("لم يتم التعرف على كلام عربي — تحدّث بالعربية وحاول مجددًا");

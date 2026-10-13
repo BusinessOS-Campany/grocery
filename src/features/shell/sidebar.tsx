@@ -6,7 +6,7 @@ import { useState } from "react";
 import { ChevronsLeft, ChevronsRight, Store } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Dictionary } from "@/shared/i18n";
-import { NAV_GROUPS, navLabel } from "./nav-config";
+import { NAV_GROUPS, navLabel, useNavIntent } from "./nav-config";
 
 interface Props {
   t: Dictionary;
@@ -21,6 +21,7 @@ function hasPerm(perms: string[], key?: string) {
 
 export function Sidebar({ t, permissions, storeName }: Props) {
   const pathname = usePathname();
+  const nav = useNavIntent();
   const [collapsed, setCollapsed] = useState(false);
 
   const visible = NAV_GROUPS.filter((g) => hasPerm(permissions, g.permission)).map((g) => ({
@@ -60,6 +61,11 @@ export function Sidebar({ t, permissions, storeName }: Props) {
                   <li key={item.href}>
                     <Link
                       href={item.href}
+                      prefetch={nav.intent === item.href}
+                      onMouseEnter={() => nav.enter(item.href)}
+                      onMouseLeave={() => nav.leave(item.href)}
+                      onFocus={() => nav.enter(item.href)}
+                      onBlur={() => nav.leave(item.href)}
                       title={collapsed ? navLabel(t.nav, t.reports, item.labelKey) : undefined}
                       className={cn(
                         "flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors",

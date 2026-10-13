@@ -12,11 +12,10 @@ export default async function PurchasesReportPage({ searchParams }: PageProps<"/
   const { summary, buckets, bySupplier } = await purchasesReport(range);
 
   return (
-    <div className="space-y-4" id="pdf-paper">
-      <ReportHeader
+    <ReportHeader
         title={t.reports.purchasesReport} basePath="/reports/purchases" family="purchases"
         fromISO={range.fromISO} toISO={range.toISO}
-      />
+      >
       <SummaryCards items={[
         { label: t.reports.docsCount, value: formatNumber(summary.docs, locale) },
         { label: t.common.total, value: formatMoney(summary.gross, locale), accent: true },
@@ -73,6 +72,6 @@ export default async function PurchasesReportPage({ searchParams }: PageProps<"/
           </Table>
         </ReportSection>
       </div>
-    </div>
+    </ReportHeader>
   );
 }

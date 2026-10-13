@@ -4,6 +4,7 @@ import { LiveQueryInput } from "@/components/live-query-input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Pagination, clampPage, DEFAULT_PAGE_SIZE } from "@/components/pagination";
 import { getT } from "@/shared/i18n";
+import { mountedHref } from "@/lib/app-url";
 import { formatMoney, formatNumber } from "@/shared/core/format";
 import { listCategories, listStock } from "@/features/inventory/service";
 
@@ -32,7 +33,7 @@ export default async function StockPage({ searchParams }: PageProps<"/inventory/
         </p>
       </div>
 
-      <form className="flex flex-wrap items-center gap-2" action="/inventory/stock">
+      <form className="flex flex-wrap items-center gap-2" action={mountedHref("/inventory/stock")}>
         <LiveQueryInput placeholder={t.common.searchPlaceholder} className="w-full sm:w-64" />
         <select name="categoryId" defaultValue={categoryId ?? ""} className="h-9 w-full rounded-md border bg-background px-2 text-sm sm:w-48">
           <option value="">{t.common.all}</option>
@@ -41,7 +42,7 @@ export default async function StockPage({ searchParams }: PageProps<"/inventory/
           ))}
         </select>
         <Button type="submit" variant="secondary" size="sm">{t.common.filter}</Button>
-        <a href="/inventory/stock" className="text-xs text-muted-foreground hover:underline">{t.common.reset}</a>
+        <a href={mountedHref("/inventory/stock")} className="text-xs text-muted-foreground hover:underline">{t.common.reset}</a>
       </form>
 
       <Card>

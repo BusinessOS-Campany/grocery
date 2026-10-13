@@ -10,6 +10,7 @@ import { getStoreSettings } from "@/features/settings/service";
 import { firstParam } from "@/components/pagination";
 import type { CustomerTransactionType } from "@/generated/prisma/client";
 import { PdfActions } from "@/components/pdf-actions";
+import { mountedHref } from "@/lib/app-url";
 
 export default async function CustomerStatementPage({
   params,
@@ -236,7 +237,7 @@ export default async function CustomerStatementPage({
                       <div style={{ display: "flex", justifyContent: "center", padding: "6px 0" }}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={`/api/customers/transactions/${x.id}/image`}
+                          src={mountedHref(`/api/customers/transactions/${x.id}/image`)}
                           alt=""
                           loading="eager"
                           style={{ maxWidth: "100%", maxHeight: 520, borderRadius: 4 }}

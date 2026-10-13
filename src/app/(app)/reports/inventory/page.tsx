@@ -13,11 +13,10 @@ export default async function InventoryReportPage({ searchParams }: PageProps<"/
   const { items, totals } = await inventoryValuation();
 
   return (
-    <div className="space-y-4" id="pdf-paper">
-      <ReportHeader
+    <ReportHeader
         title={t.reports.inventoryReport} basePath="/reports/inventory" family="inventory"
         fromISO={parseReportRange({}).fromISO} toISO={parseReportRange({}).toISO}
-      />
+      >
       <SummaryCards items={[
         { label: t.reports.stockValue, value: formatMoney(totals.stockValue, locale), accent: true },
         { label: t.reports.retailValue, value: formatMoney(totals.retailValue, locale) },
@@ -71,6 +70,6 @@ export default async function InventoryReportPage({ searchParams }: PageProps<"/
           </TableBody>
         </Table>
       </ReportSection>
-    </div>
+    </ReportHeader>
   );
 }

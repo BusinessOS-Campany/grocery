@@ -14,6 +14,7 @@ import { D } from "@/shared/core/money";
 import type { SaleStatus } from "@/generated/prisma/client";
 import { listSales } from "@/features/sales/service";
 import { CancelSaleButton } from "@/features/sales/ui/cancel-sale-button";
+import { mountedHref } from "@/lib/app-url";
 
 const STATUSES: (SaleStatus | "all")[] = ["all", "COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED", "CANCELLED"];
 
@@ -35,7 +36,7 @@ export default async function OrdersPage({ searchParams }: PageProps<"/sales/ord
     <div className="space-y-4">
       <h1 className="text-2xl font-bold tracking-tight">{t.sales.ordersTitle}</h1>
 
-      <form className="flex flex-wrap items-center gap-2" action="/sales/orders">
+      <form className="flex flex-wrap items-center gap-2" action={mountedHref("/sales/orders")}>
         <LiveQueryInput placeholder="INV-000001" className="w-48" />
         <Select name="status" defaultValue={sp.status ?? "all"}>
           <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>

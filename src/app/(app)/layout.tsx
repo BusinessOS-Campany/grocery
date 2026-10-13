@@ -1,15 +1,12 @@
-import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { getCurrentUser } from "@/features/auth/session";
-import { SidebarSection, TopbarSection } from "@/features/shell/layout-sections";
-import { SidebarSkeleton, TopbarSkeleton } from "@/components/ui/page-skeletons";
-import { SafeSection } from "@/components/ui/safe-section";
-
-// Every route under (app) reads the database on demand. Defer entirely to the
-// request renderer — never let the build's prerender pass open DB connections
-// (they trip Vercel/Supabase pool limits and make deploys flaky).
-export const dynamic = "force-dynamic";
+import { getT } from "@/shared/i18n";
+import { getStoreSettings, getSystemSettings } from "@/features/settings/service";
+import { appearanceStyleSheet, resolveAppearanceTokens } from "@/features/settings/appearance";
+import { Sidebar } from "@/features/shell/sidebar";
+import { Topbar } from "@/features/shell/topbar";
+import { notificationsForBell } from "@/features/notifications/service";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   // Defer to a real request so the build's prerender pass never opens DB
@@ -21,20 +18,49 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!user) redirect("/api/auth/expire?next=%2Flogin");
   if (user.mustChangePassword) redirect("/change-password");
 
-  // Only auth blocks the shell. Settings + notifications stream independently,
-  // so the page (and its skeletons) paint the moment the user is known. A
-  // failing sub-section degrades to its card instead of aborting the render.
+  // Independent reads run concurrently — this is the hottest path in the app.
+  // notificationsForBell returns the unread rows in one query and keeps the
+  // ~7-query condition scan off the navigation critical path.
+  const { t } = await getT();
+  const [store, notificationRows, system] = await Promise.all([
+    getStoreSettings(),
+    notificationsForBell(),
+    getSystemSettings(),
+  ]);
+  // Org appearance overrides land after globals.css, so they win on specificity
+  // ties. Empty string => globals.css defaults stay authoritative.
+  const appearanceCss = appearanceStyleSheet(resolveAppearanceTokens(system));
+  const notifications = notificationRows.map((n) => ({
+    id: n.id, type: n.type, body: n.body ?? "", href: n.href,
+    isRead: n.isRead, createdAt: n.createdAt.toISOString(),
+  }));
+  const aiVoice = Boolean(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN);
+
   return (
-    <div className="flex min-h-screen">
-      <Suspense fallback={<SidebarSkeleton />}>
-        <SafeSection name="shell.sidebar" run={() => SidebarSection({ user })} />
-      </Suspense>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <Suspense fallback={<TopbarSkeleton />}>
-          <SafeSection name="shell.topbar" run={() => TopbarSection({ user })} />
-        </Suspense>
-        <main className="flex-1 p-4 md:p-6">{children}</main>
+    <>
+      {appearanceCss ? (
+        <style dangerouslySetInnerHTML={{ __html: appearanceCss }} />
+      ) : null}
+      <div className="flex min-h-screen">
+        <Sidebar
+          t={t}
+          permissions={user.permissions}
+          storeName={store?.nameAr ?? store?.name ?? t.auth.storeName}
+        />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <Topbar
+            t={t}
+            userName={user.fullNameAr ?? user.fullName}
+            roleName={user.roleName}
+            permissions={user.permissions}
+            notifications={notifications}
+            storeName={store?.nameAr ?? store?.name ?? t.auth.storeName}
+            aiVoice={aiVoice}
+          />
+          <main className="flex-1 p-4 md:p-6">{children}</main>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
+

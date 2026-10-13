@@ -5,6 +5,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { getT } from "@/shared/i18n";
+import { mountedHref } from "@/lib/app-url";
 import { formatDateTime } from "@/shared/core/format";
 import { listBackups } from "@/features/backups/service";
 import { CreateBackupButton, DeleteBackupButton, RestoreHint } from "@/features/backups/ui/backup-buttons";
@@ -58,7 +59,7 @@ export default async function BackupSettingsPage() {
                     <div className="flex items-center justify-end gap-1">
                       {r.status === "COMPLETED" && (
                         <Button asChild variant="ghost" size="sm" className="h-7">
-                          <a href={`/api/backups/${r.id}/download`}>{t.common.download}</a>
+                          <a href={mountedHref(`/api/backups/${r.id}/download`)}>{t.common.download}</a>
                         </Button>
                       )}
                       <DeleteBackupButton t={t} id={r.id} />

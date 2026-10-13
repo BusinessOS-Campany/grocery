@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
+import { mountedHref } from "@/lib/app-url";
 import type { Dictionary } from "@/shared/i18n";
 
 export interface NotificationItem {
@@ -73,7 +74,7 @@ export function NotificationsBell({
   async function fetchLatest() {
     if (typeof document !== "undefined" && document.hidden) return;
     try {
-      const res = await fetch("/api/notifications", { cache: "no-store" });
+      const res = await fetch(mountedHref("/api/notifications"), { cache: "no-store" });
       const json = await res.json();
       if (json.ok) setItems(json.data.items);
     } catch {

@@ -10,14 +10,57 @@
  * - Queued mutations (POS sales, customer payments/debts) replay through
  *   the app's IndexedDB outbox when connectivity returns.
  */
-const VERSION = "v6";
+const VERSION = "v7";
 const STATIC_CACHE = `static-${VERSION}`;
 const DATA_CACHE = `data-${VERSION}`;
 
 // Never cache these paths (auth screens, APIs, the SW itself).
+// Matched against the app-relative path, so this works identically whether the
+// app is mounted at the origin root or under an organization's prefix.
 const NO_CACHE_PATHS = /^\/(login|forgot|reset|register|api|sw\.js)(\/|$|\?)/;
 
-self.addEventListener("install", () => {
+function appRelativePath(pathname) {
+  return MOUNT && pathname.startsWith(MOUNT) ? pathname.slice(MOUNT.length) || "/" : pathname;
+}
+
+/**
+ * Install shell assets, resolved against where this worker is actually served
+ * rather than assumed to be the origin root.
+ *
+ * A worker is scoped by the path it lives at, so `self.location.pathname` is the
+ * app's mount point (`/p967770416171/grocery/sw.js`). Hardcoding `/icons/...`
+ * here would point at the platform root, which is how an install ended up with
+ * no icon at all. Deriving the prefix keeps this correct for every org and for
+ * the standalone build with no extra configuration.
+ */
+const MOUNT = self.location.pathname.replace(/\/sw\.js$/, "");
+
+function precache() {
+  return Promise.all(
+    [
+      `${MOUNT}/manifest.webmanifest`,
+      `${MOUNT}/icons/icon-192.png`,
+      `${MOUNT}/icons/icon-512.png`,
+      `${MOUNT}/icons/icon-maskable-512.png`,
+      `${MOUNT}/icons/apple-touch-icon.png`,
+    ].map(async (path) => {
+      try {
+        const res = await fetch(new Request(path, { cache: "reload" }));
+        // Only the 2xxes land in the cache; a 404 must not be cached as an
+        // asset, which would leave the install permanently missing its icon.
+        if (!res.ok) return;
+        const cache = await caches.open(STATIC_CACHE);
+        await cache.put(path, res);
+      } catch {
+        // Offline install or a missing file: the install still succeeds, the
+        // icon is just fetched from the network when there is one.
+      }
+    }),
+  );
+}
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(precache());
   self.skipWaiting();
 });
 
@@ -54,10 +97,11 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-  if (NO_CACHE_PATHS.test(url.pathname)) return;
+  if (MOUNT && !url.pathname.startsWith(MOUNT)) return;
+  if (NO_CACHE_PATHS.test(appRelativePath(url.pathname))) return;
 
   // Immutable build assets: cache-first forever (purged on version bump).
-  if (url.pathname.startsWith("/_next/static/")) {
+  if (appRelativePath(url.pathname).startsWith("/_next/static/")) {
     event.respondWith(
       (async () => {
         const cache = await caches.open(STATIC_CACHE);

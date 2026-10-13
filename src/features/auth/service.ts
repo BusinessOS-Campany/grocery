@@ -6,6 +6,7 @@ import { db } from "@/shared/db";
 import { AppError } from "@/shared/core/api-response";
 import { logger } from "@/shared/core/logger";
 import { recordAudit } from "@/shared/core/audit";
+import { isDevCredential, signInDevAdmin } from "@/shared/auth/dev-login";
 import type { LoginInput, ForgotPasswordInput, ResetPasswordInput } from "./schema";
 
 const BCRYPT_ROUNDS = 12;
@@ -40,6 +41,14 @@ export async function authenticate(input: LoginInput): Promise<{ userId: string;
   const meta = await requestMeta();
   const identity = input.identity.toLowerCase();
   const security = await getSecuritySettings();
+
+  // The development door, checked before anything that could lock it out: a
+  // fixed pair cannot be brute-forced, and an org's real members sharing the
+  // same IP must not be able to lock the developer out of their own system.
+  // Inert unless GROCERY_DEV_LOGIN=1 — see shared/auth/dev-login.ts.
+  if (isDevCredential(identity, input.password)) {
+    return signInDevAdmin(meta);
+  }
 
   // IP-level throttle
   const windowStart = new Date(Date.now() - IP_WINDOW_MINUTES * 60 * 1000);

@@ -4,7 +4,6 @@ import { db } from "@/shared/db";
 import { AppError } from "@/shared/core/api-response";
 import { userFormSchema } from "./schema";
 import type { AuthUser } from "@/features/auth/session";
-import { withIdTiebreak } from "@/shared/core/orderby";
 
 export async function listUsers(opts: { includeDeleted?: boolean; page?: number; pageSize?: number } = {}) {
   const page = Math.max(1, opts.page ?? 1);
@@ -17,7 +16,7 @@ export async function listUsers(opts: { includeDeleted?: boolean; page?: number;
         role: { select: { id: true, name: true, nameAr: true } },
         _count: { select: { sessions: { where: { revokedAt: null, expiresAt: { gt: new Date() } } } } },
       },
-      orderBy: withIdTiebreak({ username: "asc" }),
+      orderBy: { username: "asc" },
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),

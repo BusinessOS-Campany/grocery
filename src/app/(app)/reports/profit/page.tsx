@@ -12,11 +12,10 @@ export default async function ProfitReportPage({ searchParams }: PageProps<"/rep
   const p = await profitReport(range);
 
   return (
-    <div className="space-y-4" id="pdf-paper">
-      <ReportHeader
+    <ReportHeader
         title={t.reports.profitReport} basePath="/reports/profit" family="profit"
         fromISO={range.fromISO} toISO={range.toISO}
-      />
+      >
       <SummaryCards items={[
         { label: t.reports.netSales, value: formatMoney(p.netSales, locale) },
         { label: t.reports.cogs, value: formatMoney(p.cogs, locale) },
@@ -59,6 +58,6 @@ export default async function ProfitReportPage({ searchParams }: PageProps<"/rep
           </TableBody>
         </Table>
       </ReportSection>
-    </div>
+    </ReportHeader>
   );
 }

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { mountedHref } from "@/lib/app-url";
 
 /**
  * Drop-in <VoiceInput> / <VoiceTextarea>: the wrapped field gets an embedded
@@ -82,7 +83,7 @@ function useVoiceInsert() {
         // Free-form field (notes/descriptions): disable store-name seeding so
         // dictation is not polluted with product/customer names.
         form.append("context", "note");
-        const res = await fetch("/api/ai/transcribe", { method: "POST", body: form });
+        const res = await fetch(mountedHref("/api/ai/transcribe"), { method: "POST", body: form });
         const data = (await res.json().catch(() => null)) as { text?: string; error?: string } | null;
         if (res.ok && data?.text) insertAtCursor(el, data.text);
         else if (data?.error === "NO_ARABIC_SPEECH") toast.error("لم يتم التعرف على كلام عربي — تحدّث بالعربية وحاول مجددًا");

@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "prisma generate && node --max-old-space-size=16384 node_modules/next/dist/bin/next build --webpack",
     "start": "next start",
     "lint": "eslint",
     "autopush": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/auto-push.ps1",
@@ -34,6 +34,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "decimal.js": "^10.6.0",
+    "ejs": "^6.0.1",
     "exceljs": "^4.4.0",
     "html2canvas-pro": "^2.3.9",
     "jose": "^6.2.10",
@@ -54,6 +55,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/ejs": "^3.1.5",
     "@types/node": "^20",
     "@types/pg": "^8.23.1",
     "@types/react": "^19",

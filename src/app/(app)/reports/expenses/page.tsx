@@ -13,11 +13,10 @@ export default async function ExpensesReportPage({ searchParams }: PageProps<"/r
   const data = await expensesReport(range);
 
   return (
-    <div className="space-y-4" id="pdf-paper">
-      <ReportHeader
+    <ReportHeader
         title={t.reports.expensesReport} basePath="/reports/expenses" family="expenses"
         fromISO={range.fromISO} toISO={range.toISO}
-      />
+      >
       <SummaryCards items={[
         { label: t.reports.operatingExpenses, value: formatMoney(data.grandTotal, locale), accent: true },
         { label: formatNumber(data.byMethod.reduce((a, m) => a + m.count, 0), locale), value: t.reports.docsCount },
@@ -96,6 +95,6 @@ export default async function ExpensesReportPage({ searchParams }: PageProps<"/r
           </ReportSection>
         </div>
       </div>
-    </div>
+    </ReportHeader>
   );
 }

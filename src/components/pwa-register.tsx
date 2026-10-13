@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { toast } from "sonner";
+import { serviceWorkerUrl } from "@/lib/app-url";
 
 /**
  * Registers the service worker that backs PWA install + offline support.
@@ -32,7 +33,10 @@ export function PwaRegister() {
       }
     };
     navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
-    navigator.serviceWorker.register("/sw.js").then((reg) => {
+    // Scoped to this app's mount point (`/grocery` standalone, `/gm/grocery`
+    // inside the platform). Registering `/sw.js` would claim the whole origin
+    // with the platform's worker and reload this tab whenever it took over.
+    navigator.serviceWorker.register(serviceWorkerUrl(process.env.__NEXT_ROUTER_BASEPATH)).then((reg) => {
       reg.update().catch(() => {});
     }).catch(() => {});
 

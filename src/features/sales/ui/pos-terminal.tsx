@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Minus, Plus, Printer, Search, Trash2, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { mountedHref } from "@/lib/app-url";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -203,12 +204,10 @@ export function PosTerminal({ t, locale, products, customers, canDiscount }: Pro
     if (payMethod !== "CREDIT") {
       payments.push({ method: payMethod, amount: Math.min(paid, totals.total) });
     }
-    const clientId = crypto.randomUUID();
     const payload = {
       items: cart.map((l) => ({ productId: l.id, quantity: l.qty, discount: l.discount || undefined })),
       customerId,
       invoiceDiscount: Number(invoiceDiscount) || 0,
-      clientId,
       payments: totals.creditTotal > 0
         ? [...payments, { method: "CREDIT" as const, amount: totals.creditTotal }]
         : payments,
@@ -489,7 +488,7 @@ export function PosTerminal({ t, locale, products, customers, canDiscount }: Pro
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
             {!receipt?.offline && (
-              <a href={`/sales/receipt/${receipt?.saleId ?? ""}`} target="_blank" rel="noreferrer">
+              <a href={mountedHref(`/sales/receipt/${receipt?.saleId ?? ""}`)} target="_blank" rel="noreferrer">
                 <Button variant="outline" size="sm"><Printer className="size-4" /> {s.printInvoice}</Button>
               </a>
             )}

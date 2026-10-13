@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { mountedHref } from "@/lib/app-url";
 
 export const txnImageUrl = (txnId: string) =>
-  `/api/customers/transactions/${txnId}/image`;
+  mountedHref(`/api/customers/transactions/${txnId}/image`);
 
 /** Click-to-enlarge thumbnail for a transaction note image. */
 export function TxnImage({

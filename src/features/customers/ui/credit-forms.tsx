@@ -54,8 +54,7 @@ export function CustomerTxnDialog({
   async function submit(formData: FormData) {
     setBusy(true);
     const raw = Object.fromEntries(formData.entries());
-    const clientId = crypto.randomUUID();
-    const payload = { ...raw, type, clientId };
+    const payload = { ...raw, type };
 
     // Offline (or request failed): queue locally, replayed automatically later.
     // The note image rides along and is uploaded after replay succeeds.

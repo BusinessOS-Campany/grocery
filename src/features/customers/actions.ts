@@ -2,14 +2,12 @@
 
 import { guard, ok } from "@/shared/core/api-response";
 import { requirePermission } from "@/features/auth/session";
-import { customerTxnSchema } from "./schema";
 import {
   saveCustomer, softDeleteCustomer, getCustomerForEdit,
   listGroups, saveGroup, deleteGroup,
-  recordCustomerTxn, findCustomerTxnDuplicate, listCustomerTransactions, getStatement,
+  recordCustomerTxn, listCustomerTransactions, getStatement,
   deleteCustomerTxnsByMonth,
   updateCustomerTxn, deleteCustomerTxn,
-  clearCustomerAccount,
   attachCustomerTxnImage, deleteCustomerTxnImage,
   setCustomerBalanceFrozen,
 } from "./service";
@@ -80,15 +78,6 @@ export async function recordCustomerTxnAction(raw: unknown) {
   });
 }
 
-/** Replay-path duplicate lookup: returns the latest identical row (or none). */
-export async function matchCustomerTxnAction(raw: unknown) {
-  return guard(async () => {
-    const user = await requirePermission("customers.credit");
-    const input = customerTxnSchema.parse(raw);
-    return ok(await findCustomerTxnDuplicate(user.id, input));
-  });
-}
-
 export async function deleteCustomerTxnsMonthAction(raw: { month: string; customerId?: string }) {
   return guard(async () => {
     const user = await requirePermission("customers.credit");
@@ -107,14 +96,6 @@ export async function deleteCustomerTxnAction(id: string) {
   return guard(async () => {
     const user = await requirePermission("customers.credit");
     return ok(await deleteCustomerTxn(user.id, id));
-  });
-}
-
-/** تصفية الحساب — delete all transactions of a customer and zero the balance. */
-export async function clearCustomerAccountAction(customerId: string) {
-  return guard(async () => {
-    const user = await requirePermission("customers.credit");
-    return ok(await clearCustomerAccount(user.id, customerId));
   });
 }
 

@@ -12,11 +12,10 @@ export default async function TaxReportPage({ searchParams }: PageProps<"/report
   const tax = await taxReport(range);
 
   return (
-    <div className="space-y-4" id="pdf-paper">
-      <ReportHeader
+    <ReportHeader
         title={t.reports.taxReport} basePath="/reports/tax" family="tax"
         fromISO={range.fromISO} toISO={range.toISO}
-      />
+      >
       <SummaryCards items={[
         { label: t.reports.outputTax, value: formatMoney(tax.outputTax, locale) },
         { label: t.reports.inputTax, value: formatMoney(tax.inputTax, locale) },
@@ -54,6 +53,6 @@ export default async function TaxReportPage({ searchParams }: PageProps<"/report
           </TableBody>
         </Table>
       </ReportSection>
-    </div>
+    </ReportHeader>
   );
 }

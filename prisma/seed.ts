@@ -6,8 +6,10 @@ import { PrismaClient } from "../src/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import bcrypt from "bcryptjs";
 
+const pgUrl = (process.env.DATABASE_URL ?? "postgresql://localhost:5432/grocery_db").replace(/\?schema=[^&]*$/, "");
+
 const db = new PrismaClient({
-  adapter: new PrismaPg(process.env.DATABASE_URL ?? "postgresql://localhost:5432/grocery_db", { schema: "public" }),
+  adapter: new PrismaPg(pgUrl, { schema: "grocery" }),
 });
 
 function mulberry32(seed: number) {
@@ -25,7 +27,7 @@ const daysAgo = (d: number) => new Date(Date.now() - d * 86400000);
 const pad = (n: number, len = 6) => String(n).padStart(len, "0");
 const m2 = (n: number) => n.toFixed(2);
 const m3 = (n: number) => n.toFixed(3);
-const DEV_PASSWORD = "Dev@12345"; // development-only credentials (spec §44)
+const DEV_PASSWORD = "demo123"; // development-only credentials (spec §44)
 
 interface SaleDraft {
   customerId: string | null;
@@ -60,6 +62,7 @@ async function main() {
     ["cashier2", "cashier2@example.com", "Evening Cashier", "أمين الصندوق المسائي", "CASHIER"],
     ["inventory", "inventory@example.com", "Inventory Manager", "مدير المخزون", "INVENTORY_MANAGER"],
     ["accountant", "accountant@example.com", "Chief Accountant", "المحاسب الرئيسي", "ACCOUNTANT"],
+    ["demo", "demo@example.com", "Demo User", "مستخدم تجريبي", "ADMINISTRATOR"],
   ] as const) {
     await db.user.create({
       data: { username: u[0], email: u[1], fullName: u[2], fullNameAr: u[3], passwordHash, roleId: roleId[u[4]], status: "ACTIVE" },
