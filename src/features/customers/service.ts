@@ -1,0 +1,765 @@
+import "server-only";
+import { randomUUID } from "node:crypto";
+import { cache } from "react";
+import Decimal from "decimal.js";
+import { db } from "@/shared/db";
+import { AppError } from "@/shared/core/api-response";
+import { notify } from "@/features/notifications/service";
+import { D, money } from "@/shared/core/money";
+import { withIdTiebreak } from "@/shared/core/orderby";
+import { isValidClientId } from "@/shared/core/clientid";
+import { logger } from "@/shared/core/logger";
+import { ledgerDelta } from "./ledger";
+import { TXN_IMAGE_BUCKET, uploadObject, removeObjects, downloadObject } from "@/shared/supabase-storage";
+import {
+  decodeImageData as decodeTxnImage,
+  extensionForMime,
+  sniffImageMime,
+  type ImageMime as TxnImageMime,
+} from "@/shared/core/image-data";
+import {
+  customerSchema, customerGroupSchema, customerTxnSchema,
+} from "./schema";
+import type { CustomerTxnInput } from "./schema";
+import type { Prisma, PrismaClient, CustomerTransactionType } from "@/generated/prisma/client";
+
+// ---------------------------------------------------------------------------
+// Customers
+// ---------------------------------------------------------------------------
+
+export async function listCustomers(opts: {
+  q?: string; groupId?: string; includeInactive?: boolean; frozen?: boolean; page?: number; pageSize?: number;
+}) {
+  const page = Math.max(1, opts.page ?? 1);
+  const pageSize = opts.pageSize ?? 25;
+  const q = opts.q?.trim();
+  const where: Prisma.CustomerWhereInput = {
+    deletedAt: null,
+    ...(!opts.includeInactive ? { isActive: true } : {}),
+    ...(opts.groupId ? { groupId: opts.groupId } : {}),
+    ...(opts.frozen === undefined ? {} : { balanceFrozen: opts.frozen }),
+    ...(q
+      ? {
+          OR: [
+            { name: { contains: q, mode: "insensitive" } },
+            { nameAr: { contains: q } },
+            { code: { contains: q, mode: "insensitive" } },
+            { phone: { contains: q } },
+          ],
+        }
+      : {}),
+  };
+  const [rows, count] = await Promise.all([
+    db.customer.findMany({
+      where,
+      include: { group: { select: { id: true, name: true, discountRate: true } } },
+      orderBy: withIdTiebreak({ name: "asc" }),
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    db.customer.count({ where }),
+  ]);
+  return { rows, total: count, page, pageSize };
+}
+
+/**
+ * Minimal customer list for pickers/dialogs. Unlike `listCustomers` it skips
+ * the group join and every unused column, so the payment dialog stays cheap
+ * on a page that does not otherwise need the customer table.
+ */
+export async function listCustomerOptions(take = 500) {
+  return db.customer.findMany({
+    where: { deletedAt: null, isActive: true },
+    select: { id: true, name: true, nameAr: true, balance: true },
+    orderBy: { name: "asc" },
+    take,
+  });
+}
+
+/**
+ * Aggregate customer KPIs for the header cards. Every query is a single
+ * COUNT/SUM aggregate (no row loading); `cache` collapses repeat calls within
+ * one render, so a page can request the whole set without extra round-trips.
+ */
+export const getCustomerStats = cache(async () => {
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const notDeleted: Prisma.CustomerWhereInput = { deletedAt: null };
+
+  const [total, active, frozen, debt, withDebt, frozenDebt, newThisMonth] = await Promise.all([
+    db.customer.count({ where: notDeleted }),
+    db.customer.count({ where: { ...notDeleted, isActive: true } }),
+    db.customer.count({ where: { ...notDeleted, balanceFrozen: true } }),
+    db.customer.aggregate({ _sum: { balance: true }, where: { ...notDeleted, balance: { gt: 0 } } }),
+    db.customer.count({ where: { ...notDeleted, balance: { gt: 0 } } }),
+    db.customer.aggregate({ _sum: { balance: true }, where: { ...notDeleted, balanceFrozen: true, balance: { gt: 0 } } }),
+    db.customer.count({ where: { ...notDeleted, createdAt: { gte: monthStart } } }),
+  ]);
+
+  return {
+    total,
+    active,
+    frozen,
+    withDebt,
+    newThisMonth,
+    receivable: D(debt._sum.balance ?? 0).toString(),
+    frozenReceivable: D(frozenDebt._sum.balance ?? 0).toString(),
+  };
+});
+
+export async function getCustomerForEdit(id: string) {
+  const c = await db.customer.findFirst({
+    where: { id, deletedAt: null },
+    include: { group: { select: { id: true } } },
+  });
+  if (!c) throw new AppError("NOT_FOUND", "Customer not found");
+  return c;
+}
+
+export async function saveCustomer(id: string | null, raw: unknown) {
+  const data = customerSchema.parse(raw);
+  const base = {
+    name: data.name,
+    nameAr: data.nameAr || null,
+    phone: data.phone || null,
+    email: data.email || null,
+    address: data.address || null,
+    groupId: data.groupId || null,
+    creditLimit: money(data.creditLimit).toString(),
+    notes: data.notes || null,
+  };
+  if (id) {
+    const existing = await db.customer.findFirst({ where: { id, deletedAt: null } });
+    if (!existing) throw new AppError("NOT_FOUND", "Customer not found");
+    return db.customer.update({ where: { id }, data: base });
+  }
+  const seq = await db.customer.count();
+  return db.customer.create({
+    data: {
+      code: `CUS-${String(seq + 1).padStart(4, "0")}`,
+      ...base,
+    },
+  });
+}
+
+/** Deactivate + soft-delete. Blocked when the customer has a ledger balance. */
+export async function softDeleteCustomer(id: string) {
+  const c = await db.customer.findFirst({ where: { id, deletedAt: null } });
+  if (!c) throw new AppError("NOT_FOUND", "Customer not found");
+  if (D(c.balance).gt(0)) throw new AppError("IN_USE", "Customer has outstanding balance");
+  await db.customer.update({ where: { id }, data: { deletedAt: new Date(), isActive: false } });
+}
+
+/** Freeze/unfreeze a customer's balance — prevents new debt while frozen. */
+export async function setCustomerBalanceFrozen(id: string, frozen: boolean) {
+  const c = await db.customer.findFirst({ where: { id, deletedAt: null } });
+  if (!c) throw new AppError("NOT_FOUND", "Customer not found");
+  if (c.balanceFrozen === frozen) return c;
+  return db.customer.update({ where: { id }, data: { balanceFrozen: frozen } });
+}
+
+// ---------------------------------------------------------------------------
+// Groups
+// ---------------------------------------------------------------------------
+
+export async function listGroups() {
+  return db.customerGroup.findMany({
+    orderBy: { name: "asc" },
+    include: { _count: { select: { customers: true } } },
+  });
+}
+
+export async function saveGroup(id: string | null, raw: unknown) {
+  const data = customerGroupSchema.parse(raw);
+  const payload = {
+    name: data.name,
+    nameAr: data.nameAr || null,
+    description: data.description || null,
+    discountRate: data.discountRate,
+    priceMode: data.priceMode,
+  };
+  if (id) {
+    return db.customerGroup.update({ where: { id }, data: payload });
+  }
+  return db.customerGroup.create({ data: payload });
+}
+
+export async function deleteGroup(id: string) {
+  const inUse = await db.customer.count({ where: { groupId: id } });
+  if (inUse > 0) throw new AppError("IN_USE", "Group has members");
+  await db.customerGroup.delete({ where: { id } });
+}
+
+// ---------------------------------------------------------------------------
+// Credit ledger — PAYMENT lowers balance, DEBT raises it.
+// Every entry records balanceAfter for statement reconstruction.
+// ---------------------------------------------------------------------------
+
+export async function recordCustomerTxn(userId: string, raw: unknown) {
+  const input = customerTxnSchema.parse(raw);
+  const result = await db.$transaction(async (tx) => {
+    const resultFor = (existing: {
+      id: string; customerId: string; type: CustomerTransactionType; amount: Decimal; balanceAfter: Decimal;
+    }) => (
+      tx.customer.findUnique({ where: { id: existing.customerId }, select: { name: true, nameAr: true } })
+        .then((c) => ({
+          id: existing.id,
+          balanceAfter: existing.balanceAfter.toString(),
+          customerName: c?.name ?? existing.customerId,
+          customerNameAr: c?.nameAr ?? null,
+          txnType: existing.type,
+          amount: existing.amount.toString(),
+        }))
+    );
+
+    // Resurrection guard: a clientId whose row was deliberately deleted
+    // (duplicate purge, manual delete, clear account) is tombstoned. An
+    // offline outbox replay or mobile resubmit carrying that same key is the
+    // SAME operation as the removed row — drop it instead of minting a fresh
+    // copy (the identical customer/amount/note repeat can also be a genuine
+    // new debt ~24h later, so only the key is trusted here, not content).
+    if (input.clientId) {
+      const sealed = await tx.deletedKey.findUnique({ where: { clientId: input.clientId } });
+      if (sealed) throw new AppError("DELETED_KEY", "This entry was already deleted / تم حذف هذا السجل");
+    }
+
+    // Idempotent replay guard: the offline outbox retries until it gets a
+    // response, so the same clientId may arrive twice. Return the original
+    // row instead of minting a duplicate (and don't touch the balance twice).
+    if (input.clientId) {
+      const existing = await tx.customerTransaction.findUnique({
+        where: { clientId: input.clientId },
+      });
+      if (existing) return resultFor(existing);
+    }
+
+    // Defense-in-depth: an identical record by the same cashier within the
+    // dedupe horizon is a retry of a committed request, not a new entry. This
+    // runs even when a clientId is present — a retry that mints a fresh key
+    // (double submit, timeout-then-retry, legacy tabs/mobile resync) would
+    // otherwise bypass the clientId lookup above and double-record.
+    //
+    // Horizon is 6h: real retry storms arrive minutes apart (the observed
+    // CUS-0004 burst was 1950×3 spaced 5.5/6 minutes apart), while legitimate
+    // repeat entries for the same customer are ~24h apart or differ in amount
+    // or note — so this never swallows genuine daily orders.
+    const recent = await tx.customerTransaction.findFirst({
+      where: {
+        customerId: input.customerId,
+        type: input.type,
+        amount: money(input.amount),
+        note: input.note || null,
+        userId,
+        createdAt: { gte: new Date(Date.now() - 6 * 60 * 60 * 1000) },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    if (recent) return resultFor(recent);
+
+    const customer = await tx.customer.findFirst({ where: { id: input.customerId, deletedAt: null } });
+    if (!customer) throw new AppError("NOT_FOUND", "Customer not found");
+    if (customer.balanceFrozen && input.type !== "PAYMENT") {
+      throw new AppError("BALANCE_FROZEN", "Customer balance is frozen");
+    }
+
+    let delta: ReturnType<typeof D>;
+    if (input.type === "PAYMENT") {
+      if (D(input.amount).gt(D(customer.balance))) {
+        throw new AppError("VALIDATION_ERROR", `Balance is only ${customer.balance}`);
+      }
+      delta = D(customer.balance).minus(money(input.amount));
+    } else if (input.type === "DEBT") {
+      delta = D(customer.balance).plus(money(input.amount));
+      if (D(customer.creditLimit).gt(0) && delta.gt(D(customer.creditLimit))) {
+        throw new AppError("CREDIT_LIMIT_EXCEEDED", "Credit limit exceeded");
+      }
+    } else {
+      // Manual adjustment — signed via note convention; amount always positive here,
+      // direction chosen by current balance target is not assumed. We raise debt.
+      delta = D(customer.balance).plus(money(input.amount));
+    }
+
+    await tx.customer.update({
+      where: { id: customer.id },
+      data: { balance: delta.toString() },
+    });
+
+    const txn = await tx.customerTransaction.create({
+      data: {
+        customerId: customer.id,
+        type: input.type,
+        amount: money(input.amount).toString(),
+        balanceAfter: delta.toString(),
+        note: input.note || null,
+        userId,
+        clientId: input.clientId ?? null,
+      },
+    });
+
+    await import("@/shared/core/audit").then(({ recordAudit }) =>
+      recordAudit(tx, { userId, action: `CUSTOMER_${input.type}`, entityType: "CustomerTransaction", entityId: txn.id }),
+    );
+    return {
+      id: txn.id,
+      balanceAfter: delta.toString(),
+      customerName: customer.name,
+      customerNameAr: customer.nameAr ?? null,
+      txnType: input.type,
+      amount: money(input.amount).toString(),
+    };
+  });
+  void notify({
+    type: "CUSTOMER_PAYMENT", title: "CUSTOMER_PAYMENT",
+    body: `${result.customerNameAr ?? result.customerName} · ${result.txnType} · ${result.amount}`,
+    entityType: "Customer", entityId: input.customerId, href: "/customers/transactions",
+  });
+  return { id: result.id, balanceAfter: result.balanceAfter };
+}
+
+/**
+ * Match an identical ledger entry for the same cashier, over any horizon.
+ * Replay paths (offline outbox, mobile API) that lack an idempotency key use
+ * this to recognize an already-committed submission and drop the retry instead
+ * of minting a second row. Returns the newest matching row's id + balanceAfter.
+ */
+export async function findCustomerTxnDuplicate(
+  userId: string,
+  raw: Pick<CustomerTxnInput, "customerId" | "type" | "amount" | "note">,
+) {
+  return db.customerTransaction.findFirst({
+    where: {
+      customerId: raw.customerId,
+      type: raw.type,
+      amount: money(raw.amount),
+      note: raw.note?.trim() || null,
+      userId,
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, balanceAfter: true },
+  });
+}
+
+function txnSearchWhere(q?: string): Prisma.CustomerTransactionWhereInput | undefined {
+  if (!q) return undefined;
+  const n = Number(q);
+  const numeric = Number.isFinite(n) ? n : null;
+  return {
+    OR: [
+      { note: { contains: q } },
+      { customer: { OR: [{ name: { contains: q } }, { nameAr: { contains: q } }, { code: { contains: q } }] } },
+      ...(numeric === null ? [] : [{ amount: numeric }, { balanceAfter: numeric }]),
+    ],
+  };
+}
+
+/** Parse a YYYY-MM string into a [start, end) date range (local time). */
+function monthRange(month?: string): { gte: Date; lt: Date } | undefined {
+  if (!month) return undefined;
+  const m = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!m) return undefined;
+  const year = Number(m[1]);
+  const mon = Number(m[2]);
+  if (mon < 1 || mon > 12) return undefined;
+  return {
+    gte: new Date(year, mon - 1, 1, 0, 0, 0, 0),
+    lt: mon === 12 ? new Date(year + 1, 0, 1) : new Date(year, mon, 1),
+  };
+}
+
+export async function listCustomerTransactions(opts: {
+  customerId?: string; type?: "PAYMENT" | "DEBT" | "REFUND" | "ADJUSTMENT";
+  q?: string; month?: string;
+  page?: number; pageSize?: number;
+}) {
+  const page = Math.max(1, opts.page ?? 1);
+  const pageSize = opts.pageSize ?? 25;
+  const where: Prisma.CustomerTransactionWhereInput = {
+    ...(opts.customerId ? { customerId: opts.customerId } : {}),
+    ...(opts.type ? { type: opts.type } : {}),
+    ...monthRange(opts.month),
+    ...txnSearchWhere(opts.q),
+  };
+  const [rows, count] = await Promise.all([
+    db.customerTransaction.findMany({
+      where,
+      include: { customer: { select: { code: true, name: true, nameAr: true } } },
+      orderBy: withIdTiebreak([{ createdAt: "desc" }, { id: "desc" }]),
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    db.customerTransaction.count({ where }),
+  ]);
+  return { rows, total: count, page, pageSize };
+}
+
+/** One row per customer — their most recent transaction (grouped ledger view). */
+export async function listLatestCustomerTransactions(opts: {
+  q?: string; month?: string;
+  page?: number; pageSize?: number;
+}) {
+  const page = Math.max(1, opts.page ?? 1);
+  const pageSize = opts.pageSize ?? 25;
+  const where: Prisma.CustomerTransactionWhereInput = {
+    ...monthRange(opts.month),
+    ...txnSearchWhere(opts.q),
+  };
+
+  const [allGroups, pageGroups] = await Promise.all([
+    db.customerTransaction.groupBy({ by: ["customerId"], where }),
+    db.customerTransaction.groupBy({
+      by: ["customerId"],
+      where,
+      _max: { createdAt: true },
+      orderBy: [{ _max: { createdAt: "desc" } }, { customerId: "asc" }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
+
+  const pairs = pageGroups.map((g) => ({ customerId: g.customerId, createdAt: g._max.createdAt as Date }));
+  const rows = pairs.length
+    ? await db.customerTransaction.findMany({
+        where: { OR: pairs },
+        include: { customer: { select: { code: true, name: true, nameAr: true } } },
+      })
+    : [];
+  const orderIndex = new Map(pairs.map((p, i) => [`${p.customerId}|${p.createdAt.toISOString()}`, i]));
+  rows.sort((a, b) => {
+    const ia = orderIndex.get(`${a.customerId}|${a.createdAt.toISOString()}`) ?? 0;
+    const ib = orderIndex.get(`${b.customerId}|${b.createdAt.toISOString()}`) ?? 0;
+    return ia - ib;
+  });
+
+  return { rows, total: allGroups.length, page, pageSize };
+}
+
+/**
+ * Ledger totals for the transactions page cards — one grouped aggregate over
+ * the active filter (customer and/or month). `net` follows `ledgerDelta`:
+ * DEBT/ADJUSTMENT raise the balance, PAYMENT/REFUND lower it.
+ */
+export async function getCustomerTxnStats(opts: { customerId?: string; month?: string }) {
+  const where: Prisma.CustomerTransactionWhereInput = {
+    ...(opts.customerId ? { customerId: opts.customerId } : {}),
+    ...monthRange(opts.month),
+  };
+  const grouped = await db.customerTransaction.groupBy({
+    by: ["type"],
+    where,
+    _sum: { amount: true },
+    _count: { _all: true },
+  });
+
+  let debt = D(0);
+  let payment = D(0);
+  let count = 0;
+  for (const g of grouped) {
+    count += g._count._all;
+    const amt = D(g._sum.amount ?? 0);
+    if (g.type === "PAYMENT" || g.type === "REFUND") payment = payment.plus(amt.abs());
+    else debt = debt.plus(amt.abs());
+  }
+  return {
+    count,
+    debt: debt.toString(),
+    payment: payment.toString(),
+    net: debt.minus(payment).toString(),
+  };
+}
+
+/**
+ * Seal the idempotency keys of rows being removed so a stale offline replay
+ * carrying one of those keys is recognized as the deleted operation and never
+ * resurrected (see the DELETED_KEY guard in recordCustomerTxn).
+ */
+async function tombstoneDeletedKeys(
+  client: Prisma.TransactionClient | PrismaClient,
+  rows: { clientId: string | null }[],
+  reason: string,
+) {
+  const keys = [...new Set(rows.map((r) => r.clientId).filter((k): k is string => !!k))];
+  // Legacy rows can carry a malformed (non-UUID) idempotency key. Such a key
+  // can never be produced again by a current client, so it is not a usable
+  // seal — but it must never block a delete. Skip + log instead of throwing,
+  // which used to abort the whole transaction and surface as the generic
+  // "Unexpected error occurred" on تصفية الحساب / delete / month-purge.
+  const valid = keys.filter((key) => {
+    if (isValidClientId(key)) return true;
+    logger.warn("skip_malformed_client_id", { reason, key });
+    return false;
+  });
+  // One bulk insert instead of a round-trip per key. A heavy account can carry
+  // thousands of ledger rows; the old per-key `upsert` loop ran thousands of
+  // sequential queries inside the interactive transaction and blew its 5s
+  // timeout (P2028), which also surfaced as "Unexpected error occurred" even
+  // after the malformed-key throw was fixed. `skipDuplicates` keeps the
+  // "seal once" semantics of the old upsert.
+  const CHUNK = 1000;
+  for (let i = 0; i < valid.length; i += CHUNK) {
+    await client.deletedKey.createMany({
+      data: valid.slice(i, i + CHUNK).map((clientId) => ({ clientId, reason })),
+      skipDuplicates: true,
+    });
+  }
+}
+
+/**
+ * Delete every transaction inside a calendar month (optionally one customer),
+ * then recompute each affected customer's balance from their remaining rows:
+ * DEBT and ADJUSTMENT add, PAYMENT subtracts, REFUND amounts are stored
+ * negated so they subtract as well.
+ */
+export async function deleteCustomerTxnsByMonth(
+  userId: string,
+  input: { month: string; customerId?: string },
+) {
+  const range = monthRange(input.month);
+  if (!range) throw new AppError("VALIDATION_ERROR", "Invalid month (expected YYYY-MM)");
+  return db.$transaction(async (tx) => {
+    const where: Prisma.CustomerTransactionWhereInput = {
+      createdAt: range,
+      ...(input.customerId ? { customerId: input.customerId } : {}),
+    };
+    const doomed = await tx.customerTransaction.findMany({
+      where, select: { customerId: true, clientId: true },
+    });
+    const affected = [...new Set(doomed.map((d) => d.customerId))];
+    const deleted = await tx.customerTransaction.deleteMany({ where });
+    await tombstoneDeletedKeys(tx, doomed, "month-delete");
+    for (const customerId of affected) {
+      const sums = await tx.customerTransaction.groupBy({
+        by: ["type"], where: { customerId }, _sum: { amount: true },
+      });
+      let balance = D(0);
+      for (const s of sums) {
+        const amt = D(s._sum.amount ?? 0);
+        balance = balance.plus(ledgerDelta(s.type, amt));
+      }
+      await tx.customer.update({ where: { id: customerId }, data: { balance: balance.toString() } });
+    }
+    await import("@/shared/core/audit").then(({ recordAudit }) =>
+      recordAudit(tx, {
+        userId, action: "CUSTOMER_TXN_MONTH_DELETE", entityType: "CustomerTransaction",
+        entityId: `${input.month}${input.customerId ? `:${input.customerId}` : ""}`,
+        newValues: { deleted: deleted.count, customers: affected.length },
+      }),
+    );
+    return { deleted: deleted.count };
+  }, { timeout: 20000 });
+}
+
+/**
+ * Recompute the running balanceAfter of every transaction for a customer
+ * (PAYMENT subtracts, everything else adds) and sync customer.balance.
+ * Used after a single-row edit/delete so statements stay accurate.
+ */
+async function recomputeCustomerLedger(tx: Prisma.TransactionClient, customerId: string) {
+  const txns = await tx.customerTransaction.findMany({
+    where: { customerId },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: { id: true, type: true, amount: true, balanceAfter: true },
+  });
+  let bal = D(0);
+  for (const t of txns) {
+    bal = bal.plus(ledgerDelta(t.type, t.amount));
+    if (!bal.eq(D(t.balanceAfter))) {
+      await tx.customerTransaction.update({
+        where: { id: t.id },
+        data: { balanceAfter: bal.toString() },
+      });
+    }
+  }
+  await tx.customer.update({ where: { id: customerId }, data: { balance: bal.toString() } });
+  return bal;
+}
+
+export async function updateCustomerTxn(
+  userId: string,
+  input: { id: string; amount: number; note?: string },
+) {
+  if (!(input.amount > 0)) throw new AppError("VALIDATION_ERROR", "Amount must be positive");
+  return db.$transaction(async (tx) => {
+    const existing = await tx.customerTransaction.findUnique({ where: { id: input.id } });
+    if (!existing) throw new AppError("NOT_FOUND", "Transaction not found");
+
+    // Preserve the stored sign convention (REFUND rows are negative).
+    const signed = D(existing.amount);
+    const newAmount = signed.lt(0) ? money(input.amount).negated() : money(input.amount);
+    await tx.customerTransaction.update({
+      where: { id: existing.id },
+      data: { amount: newAmount.toString(), note: input.note?.trim() || null },
+    });
+
+    const balance = await recomputeCustomerLedger(tx, existing.customerId);
+    const customer = await tx.customer.findUnique({ where: { id: existing.customerId } });
+    if (customer && D(customer.creditLimit).gt(0) && balance.gt(D(customer.creditLimit))) {
+      throw new AppError("CREDIT_LIMIT_EXCEEDED", "Credit limit exceeded");
+    }
+
+    await import("@/shared/core/audit").then(({ recordAudit }) =>
+      recordAudit(tx, {
+        userId, action: "CUSTOMER_TXN_UPDATE", entityType: "CustomerTransaction", entityId: existing.id,
+        oldValues: { amount: existing.amount, note: existing.note },
+        newValues: { amount: newAmount.toString(), note: input.note ?? null },
+      }),
+    );
+    return { balanceAfter: balance.toString() };
+  });
+}
+
+export async function deleteCustomerTxn(userId: string, id: string) {
+  return db.$transaction(async (tx) => {
+    const existing = await tx.customerTransaction.findUnique({ where: { id } });
+    if (!existing) throw new AppError("NOT_FOUND", "Transaction not found");
+    await tx.customerTransaction.delete({ where: { id } });
+    await tombstoneDeletedKeys(tx, [existing], "manual-delete");
+    const balance = await recomputeCustomerLedger(tx, existing.customerId);
+
+    await import("@/shared/core/audit").then(({ recordAudit }) =>
+      recordAudit(tx, {
+        userId, action: "CUSTOMER_TXN_DELETE", entityType: "CustomerTransaction", entityId: id,
+        oldValues: { type: existing.type, amount: existing.amount, note: existing.note },
+      }),
+    );
+    return { balanceAfter: balance.toString() };
+  });
+}
+
+/**
+ * Settle a customer's account (تصفية الحساب): delete every transaction and
+ * reset the balance to zero. Orphaned note-image objects are removed from
+ * storage best-effort after the ledger commit so nothing leaks.
+ */
+export async function clearCustomerAccount(userId: string, customerId: string) {
+  const customer = await db.customer.findFirst({
+    where: { id: customerId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!customer) throw new AppError("NOT_FOUND", "Customer not found");
+
+  const result = await db.$transaction(async (tx) => {
+    const rows = await tx.customerTransaction.findMany({
+      where: { customerId },
+      select: { imagePath: true, clientId: true },
+    });
+    const { count } = await tx.customerTransaction.deleteMany({ where: { customerId } });
+    await tx.customer.update({ where: { id: customerId }, data: { balance: "0" } });
+    await import("@/shared/core/audit").then(({ recordAudit }) =>
+      recordAudit(tx, {
+        userId, action: "CUSTOMER_ACCOUNT_CLEAR", entityType: "Customer",
+        entityId: customerId,
+        newValues: { deleted: count },
+      }),
+    );
+    return { deleted: count, rows };
+  }, { timeout: 20000 });
+
+  // Seal the removed idempotency keys AFTER the delete+zero has committed, as a
+  // separate best-effort step. The seal is only a safety net against stale
+  // offline replays; running it outside the transaction guarantees a seal
+  // failure can never roll back (or block) the account clear for any customer
+  // — a failed statement inside the transaction poisons it and aborts the whole
+  // clear, which is what surfaced as "Unexpected error occurred".
+  try {
+    await tombstoneDeletedKeys(db, result.rows, "account-clear");
+  } catch (err) {
+    logger.error("clear_account_seal_failed", { customerId, err });
+  }
+
+  const images = result.rows.map((r) => r.imagePath).filter((p): p is string => !!p);
+  if (images.length > 0) {
+    try {
+      await removeObjects(TXN_IMAGE_BUCKET, images);
+    } catch (err) {
+      logger.warn("clear_account_images_remove_failed", { customerId, count: images.length, err });
+      // Best effort — a stale object is harmless and swept by the dedupe tool.
+    }
+  }
+  return { deleted: result.deleted };
+}
+
+// ---------------------------------------------------------------------------
+// Transaction note images
+// Files live in private Supabase Storage (path: {userId}/{txnId}/{uuid}.ext);
+// only the object path is persisted on the transaction row.
+// ---------------------------------------------------------------------------
+
+/**
+ * Image helpers (decodeTxnImage / sniffImageMime / extensionForMime) live in
+ * `@/shared/core/image-data` — shared with the store logo upload path.
+ */
+
+/**
+ * Attach (or replace) the note image for a transaction.
+ * Upload succeeds first, the DB row is updated next, then the OLD object is
+ * removed — never before the new one is safely in place.
+ */
+export async function attachCustomerTxnImage(userId: string, txnId: string, input: { dataUrl: string; mime: string }) {
+  const buffer = decodeTxnImage(input.dataUrl, input.mime);
+  const txn = await db.customerTransaction.findUnique({ where: { id: txnId }, select: { imagePath: true } });
+  if (!txn) throw new AppError("NOT_FOUND", "Transaction not found");
+
+  const mime = sniffImageMime(new Uint8Array(buffer)) as TxnImageMime;
+  const path = `${userId}/${txnId}/${randomUUID()}.${extensionForMime(mime)}`;
+  const { path: savedPath } = await uploadObject(TXN_IMAGE_BUCKET, path, new Uint8Array(buffer), mime);
+  await db.customerTransaction.update({ where: { id: txnId }, data: { imagePath: savedPath } });
+
+  if (txn.imagePath && txn.imagePath !== savedPath) {
+    try {
+      await removeObjects(TXN_IMAGE_BUCKET, [txn.imagePath]);
+    } catch {
+      // Best effort — the new image is already live; a stale object is cleaned later.
+    }
+  }
+  return { path: savedPath };
+}
+
+export async function deleteCustomerTxnImage(txnId: string): Promise<void> {
+  const txn = await db.customerTransaction.findUnique({ where: { id: txnId }, select: { imagePath: true } });
+  if (!txn) throw new AppError("NOT_FOUND", "Transaction not found");
+  if (!txn.imagePath) return;
+  try {
+    await removeObjects(TXN_IMAGE_BUCKET, [txn.imagePath]);
+  } catch (err) {
+    // Missing object is effectively already deleted — still clear the column.
+    if (!(err instanceof AppError) || !/not found|404/i.test(err.message)) throw err;
+  }
+  await db.customerTransaction.update({ where: { id: txnId }, data: { imagePath: null } });
+}
+
+/** Stream a transaction's note image for the authenticated proxy route. */
+export async function getCustomerTxnImage(txnId: string) {
+  const txn = await db.customerTransaction.findUnique({ where: { id: txnId }, select: { imagePath: true } });
+  if (!txn?.imagePath) throw new AppError("NOT_FOUND", "Image not found");
+  return downloadObject(TXN_IMAGE_BUCKET, txn.imagePath);
+}
+
+export async function getCustomerById(id: string) {
+  return db.customer.findFirst({    where: { id, deletedAt: null },
+    select: { id: true, code: true, name: true, nameAr: true, balance: true, creditLimit: true },
+  });
+}
+
+/** Full ledger for one customer, oldest first (statement view). */
+export async function getStatement(
+  customerId: string,
+  opts?: { from?: Date; to?: Date },
+) {
+  const customer = await db.customer.findFirst({
+    where: { id: customerId, deletedAt: null },
+    include: { group: { select: { name: true, discountRate: true } } },
+  });
+  if (!customer) throw new AppError("NOT_FOUND", "Customer not found");
+  const createdAt = {
+    ...(opts?.from ? { gte: opts.from } : {}),
+    ...(opts?.to ? { lte: opts.to } : {}),
+  };
+  const txns = await db.customerTransaction.findMany({
+    where: { customerId, ...(createdAt.gte || createdAt.lte ? { createdAt } : {}) },
+    orderBy: { createdAt: "asc" },
+    take: 500,
+  });
+  return { customer, txns };
+}
+
