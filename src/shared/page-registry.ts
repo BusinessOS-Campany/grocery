@@ -40,32 +40,41 @@ export const PAGE_REGISTRY: PageEntry[] = [
   { id: "branding", href: "/settings/branding", titleAr: "الهوية والمظهر", titleEn: "Branding", permission: "settings.manage", synonyms: ["الهوية", "الهويه", "هويه", "هوية", "branding", "هوية بصرية"] },
   { id: "ai_training", href: "/settings/ai-training", titleAr: "مركز تدريب الذكاء", titleEn: "AI Training", permission: "settings.manage", synonyms: ["مركز تدريب", "training", "ai training", "ذكاء"] },
   { id: "backup", href: "/settings/backup", titleAr: "النسخ الاحتياطي", titleEn: "Backup", permission: "backup.manage", synonyms: ["backup", "النسخ", "نسخ احتياطي"] },
-  { id: "security", href: "/settings/security", titleAr: "الأمان", titleEn: "Security", permission: "settings.manage", synonyms: ["الأمان", "security", "حماية", "security settings"] },
+  { id: "security", href: "/settings/security", titleAr: "الأمان", titleEn: "Security", permission: "settings.manage", synonyms: ["الأمان", "الامان", "امان", "security", "حماية", "security settings", "إعدادات الأمان"] },
   { id: "localization", href: "/settings/localization", titleAr: "اللغة والتوطين", titleEn: "Localization", permission: "settings.view", synonyms: ["التوطين", "localization", "لغة"] },
   { id: "sales_settings", href: "/settings/sales", titleAr: "إعدادات المبيعات", titleEn: "Sales Settings", permission: "settings.view", synonyms: ["إعدادات المبيعات", "sales settings"] },
   { id: "inventory_settings", href: "/settings/inventory", titleAr: "إعدادات المخزون", titleEn: "Inventory Settings", permission: "settings.view", synonyms: ["إعدادات المخزون", "inventory settings"] },
 ];
 
+function normalizeArabic(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/ى/g, "ي")
+    .replace(/ؤ/g, "و")
+    .replace(/ئ/g, "ي")
+    .trim();
+}
+
 export function findPage(query: string): PageEntry | null {
-  const q = query.trim().toLowerCase();
+  const q = normalizeArabic(query);
   if (!q) return null;
-  // exact id/title
+  // exact id/title/synonym (normalized)
   let found = PAGE_REGISTRY.find((p) =>
-    p.id.toLowerCase() === q ||
-    p.titleAr === query.trim() ||
+    normalizeArabic(p.id) === q ||
+    normalizeArabic(p.titleAr) === q ||
     p.titleEn.toLowerCase() === q ||
-    p.href.toLowerCase() === q
+    p.href.toLowerCase() === q ||
+    p.synonyms.some((s) => normalizeArabic(s) === q)
   );
   if (found) return found;
-  // synonym/contains
+  // contains
   found = PAGE_REGISTRY.find((p) =>
-    p.synonyms.some((s) => s.toLowerCase() === q) ||
-    p.titleAr.includes(query.trim()) ||
-    query.trim().includes(p.titleAr)
+    normalizeArabic(p.titleAr).includes(q) ||
+    q.includes(normalizeArabic(p.titleAr)) ||
+    p.synonyms.some((s) => normalizeArabic(s).includes(q) || q.includes(normalizeArabic(s)))
   );
-  if (found) return found;
-  // partial contains on synonyms
-  found = PAGE_REGISTRY.find((p) => p.synonyms.some((s) => q.includes(s.toLowerCase()) || s.toLowerCase().includes(q)));
   return found ?? null;
 }
 
