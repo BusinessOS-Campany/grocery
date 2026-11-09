@@ -36,10 +36,11 @@ export function LoginForm({ t, tErrors, storeName, logoUrl }: Props) {
 
   const loginWithPasskey = async () => {
     try {
+      const identity = form.getValues("identity")?.trim() ?? "";
       const optRes = await fetch("/api/auth/passkey/auth/options", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify(identity ? { identity } : {}),
       });
       const optText = await optRes.text();
       let options: any = null;
