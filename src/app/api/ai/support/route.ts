@@ -199,24 +199,19 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // --- Navigation fallback ---
-  const navMap: Record<string, string> = {
-    "نقطة البيع": "/sales/pos", "المخزون": "/inventory/stock", "المنتجات": "/inventory/products",
-    "العملاء": "/customers/list", "المصروفات": "/expenses", "التقارير": "/reports/sales",
-    "الإعدادات": "/settings/store", "الهوية": "/settings/branding", "الهويه": "/settings/branding",
-    "الأدوار": "/roles", "الصلاحيات": "/roles", "النسخ الاحتياطي": "/settings/backup",
-    "لوحة التحكم": "/dashboard", "قرب الانتهاء": "/inventory/expiring", "الانتهاء": "/inventory/expiring",
-    "المستخدمون": "/users", "الموردون": "/procurement/suppliers", "المشتريات": "/procurement/purchases",
-    "التصنيفات": "/inventory/categories", "الحسابات المجمدة": "/customers/frozen",
-    "الآجل": "/customers/transactions", "سجل التدقيق": "/audit-log", "مركز تدريب": "/settings/ai-training",
-  };
-  const navKey = Object.keys(navMap).find((k) => lastUser.includes(k));
-  if (navKey && /اذهب|فتح|صفحة|صفحه|انتقل|open|go/.test(lastUser)) {
-    const href = navMap[navKey];
-    const reply = `جاري فتح ${navKey}...`;
+  // --- Navigation fallback using page registry ---
+  const { findPage, hasPagePermission } = await import("@/shared/page-registry");
+  const foundPage = findPage(lastUser);
+  if (foundPage && /اذهب|فتح|صفحة|صفحه|انتقل|open|go/.test(lastUser)) {
+    if (!hasPagePermission(user.permissions, foundPage)) {
+      await addMessage(conversationId, "assistant", "ليس لديك صلاحية الوصول إلى هذه الصفحة.");
+      await autoTitle(user.id, conversationId, lastUser);
+      return NextResponse.json({ reply: "ليس لديك صلاحية الوصول إلى هذه الصفحة.", conversationId });
+    }
+    const reply = `جاري فتح ${foundPage.titleAr}...`;
     await addMessage(conversationId, "assistant", reply);
     await autoTitle(user.id, conversationId, lastUser);
-    return NextResponse.json({ reply, conversationId, navigate: href });
+    return NextResponse.json({ reply, conversationId, navigate: foundPage.href });
   }
 
   // --- LLM tool selection (primary) ---
