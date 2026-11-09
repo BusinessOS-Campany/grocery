@@ -40,8 +40,9 @@ export function PasskeyManager() {
       } else {
         toast.error(verifyData?.error ?? "Registration failed");
       }
-    } catch {
-      toast.error("Registration cancelled or failed");
+    } catch (e) {
+      console.error(e);
+      toast.error(e instanceof Error ? e.message : "Registration cancelled or failed");
     } finally {
       setLoading(false);
     }

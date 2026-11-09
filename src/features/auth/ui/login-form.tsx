@@ -60,7 +60,8 @@ export function LoginForm({ t, tErrors, storeName, logoUrl }: Props) {
         toast.error(verifyData?.error ?? "فشل تسجيل الدخول");
       }
     } catch (e) {
-      toast.error("تم إلغاء المصادقة أو حدث خطأ");
+      console.error(e);
+      toast.error(e instanceof Error ? e.message : "تم إلغاء المصادقة أو حدث خطأ");
     }
   };
 
