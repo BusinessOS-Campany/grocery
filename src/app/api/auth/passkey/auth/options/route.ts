@@ -29,6 +29,11 @@ export async function POST(request: NextRequest) {
     userVerification: "preferred",
   });
 
+  // Clean up expired challenges for this user
+  await db.passkeyChallenge.deleteMany({
+    where: { userId: user?.id ?? null, expiresAt: { lte: new Date() } },
+  }).catch(() => {});
+
   await db.passkeyChallenge.create({
     data: {
       userId: user?.id ?? null,

@@ -21,15 +21,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "PASSKEY_NOT_FOUND" }, { status: 404 });
   }
 
+  console.log("[PASSKEY VERIFY] Starting verification...");
+  console.log(`[PASSKEY VERIFY] userId=${userId}, passkeyId=${passkey.id}, credentialId=${passkey.credentialId?.substring(0, 20)}...`);
+
   const challengeRow = await db.passkeyChallenge.findFirst({
-    where: { userId, type: "authenticate" },
+    where: { userId, type: "authenticate", expiresAt: { gt: new Date() } },
     orderBy: { createdAt: "desc" },
   });
-  if (challengeRow && challengeRow.expiresAt < new Date()) {
-    await db.passkeyChallenge.delete({ where: { id: challengeRow.id } }).catch(() => {});
+
+  console.log(`[PASSKEY VERIFY] Found challenge: ${!!challengeRow}, expiresAt=${challengeRow?.expiresAt ? challengeRow.expiresAt.toISOString() : 'N/A'}`);
+
+  if (!challengeRow) {
+    console.log("[PASSKEY VERIFY] No valid challenge found - returning CHALLENGE_EXPIRED");
     return NextResponse.json({ error: "CHALLENGE_EXPIRED" }, { status: 400 });
   }
-  if (!challengeRow) return NextResponse.json({ error: "NO_CHALLENGE" }, { status: 400 });
 
   let verification;
   try {
@@ -58,9 +63,20 @@ export async function POST(request: NextRequest) {
     where: { id: passkey.id },
     data: { counter: BigInt(verification.authenticationInfo.newCounter), lastUsedAt: new Date() },
   });
-  await db.passkeyChallenge.delete({ where: { id: challengeRow.id } });
+  
+  // Clean up old challenges for this user after successful verification
+  const now = new Date();
+  await db.passkeyChallenge.deleteMany({
+    where: { 
+      userId, 
+      type: "authenticate", 
+      expiresAt: { lte: now }
+    },
+  }).catch(() => {});
 
   await issueSession(userId, { ip: null, userAgent: null });
+
+  console.log(`[PASSKEY VERIFY] Authentication successful for user ${userId}, session issued`);
 
   return NextResponse.json({ ok: true, redirect: "/dashboard" });
 }
