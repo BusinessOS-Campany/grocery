@@ -12,14 +12,28 @@ type Conv = { id: string; title: string; updatedAt: string };
 
 const NAV_INTENTS: { keys: string[]; href: string; label: string }[] = [
   { keys: ["نقطة البيع", "pos", "نقطة بيع", "البيع"], href: "/sales/pos", label: "نقطة البيع" },
-  { keys: ["لوحة التحكم", "dashboard", "الرئيسية"], href: "/dashboard", label: "لوحة التحكم" },
+  { keys: ["الفواتير", "orders", "المبيعات"], href: "/sales/orders", label: "الفواتير والطلبات" },
+  { keys: ["لوحة التحكم", "dashboard", "الرئيسية", "home"], href: "/dashboard", label: "لوحة التحكم" },
   { keys: ["المنتجات", "products"], href: "/inventory/products", label: "المنتجات" },
+  { keys: ["التصنيفات", "categories"], href: "/inventory/categories", label: "التصنيفات" },
   { keys: ["المخزون", "stock"], href: "/inventory/stock", label: "المخزون" },
+  { keys: ["الانتهاء", "expiring", "الصلاحية", "قريب", "نافد"], href: "/inventory/expiring", label: "قرب الانتهاء" },
+  { keys: ["الموردون", "suppliers"], href: "/procurement/suppliers", label: "الموردون" },
+  { keys: ["أوامر الشراء", "purchase orders", "po"], href: "/procurement/purchase-orders", label: "أوامر الشراء" },
+  { keys: ["المشتريات", "purchases"], href: "/procurement/purchases", label: "المشتريات" },
+  { keys: ["مرتجعات الشراء", "purchase returns"], href: "/procurement/returns", label: "مرتجعات الشراء" },
   { keys: ["العملاء", "customers"], href: "/customers/list", label: "العملاء" },
   { keys: ["الحسابات المجمدة", "frozen", "مجمدة", "متجمدة"], href: "/customers/frozen", label: "الحسابات المجمدة" },
+  { keys: ["الآجل", "transactions", "المدفوعات"], href: "/customers/transactions", label: "الآجل والمدفوعات" },
   { keys: ["التقارير", "reports"], href: "/reports/sales", label: "التقارير" },
+  { keys: ["المصروفات", "expenses"], href: "/expenses", label: "المصروفات" },
+  { keys: ["المستخدمون", "users"], href: "/users", label: "المستخدمون" },
+  { keys: ["الأدوار", "roles", "الصلاحيات", "permissions"], href: "/roles", label: "الأدوار والصلاحيات" },
+  { keys: ["سجل التدقيق", "audit"], href: "/audit-log", label: "سجل التدقيق" },
   { keys: ["الإعدادات", "settings"], href: "/settings/store", label: "الإعدادات" },
   { keys: ["الهوية", "الهويه", "هويه", "هوية", "branding"], href: "/settings/branding", label: "الهوية والمظهر" },
+  { keys: ["مركز تدريب", "ai training", "training"], href: "/settings/ai-training", label: "مركز تدريب الذكاء" },
+  { keys: ["النسخ الاحتياطي", "backup"], href: "/settings/backup", label: "النسخ الاحتياطي" },
 ];
 
 export function SupportAgent() {
@@ -133,8 +147,8 @@ export function SupportAgent() {
       return send(true);
     }
     const navIntent = NAV_INTENTS.find((n) => n.keys.some((k) => lower.includes(k.toLowerCase())));
-    const wantsNav = /ذهاب|فتح|صفحة|صفحه|open|go to|انتقل/.test(lower);
-    const shortQuery = lower.split(/\s+/).filter(Boolean).length <= 4;
+    const wantsNav = /ذهاب|اذهب|فتح|صفحة|صفحه|open|go to|انتقل|اذهب/.test(lower);
+    const shortQuery = lower.split(/\s+/).filter(Boolean).length <= 6;
     if (navIntent && (wantsNav || shortQuery)) {
       const next: Msg[] = [...messages, { role: "user", content: text }];
       setMessages([...next, { role: "assistant", content: `جاري فتح صفحة ${navIntent.label}...` }]);
