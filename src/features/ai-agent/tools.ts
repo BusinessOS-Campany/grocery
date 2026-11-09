@@ -18,27 +18,29 @@ export interface ToolResult {
 }
 
 const ROUTES: Record<string, string> = {
-  dashboard: "/dashboard",
-  products: "/inventory/products",
-  categories: "/inventory/categories",
-  stock: "/inventory/stock",
-  expiring: "/inventory/expiring",
-  suppliers: "/procurement/suppliers",
-  purchase_orders: "/procurement/purchase-orders",
-  purchases: "/procurement/purchases",
-  customers: "/customers/list",
-  frozen: "/customers/frozen",
-  transactions: "/customers/transactions",
-  reports: "/reports/sales",
-  expenses: "/expenses",
-  users: "/users",
-  roles: "/roles",
-  audit: "/audit-log",
-  settings: "/settings/store",
-  branding: "/settings/branding",
-  backup: "/settings/backup",
-  pos: "/sales/pos",
-  orders: "/sales/orders",
+  dashboard: '/dashboard',
+  products: '/inventory/products',
+  categories: '/inventory/categories',
+  stock: '/inventory/stock',
+  expiring: '/inventory/expiring',
+  pos: '/sales/pos',
+  orders: '/sales/orders',
+  suppliers: '/procurement/suppliers',
+  purchase_orders: '/procurement/purchase-orders',
+  purchases: '/procurement/purchases',
+  returns: '/procurement/returns',
+  customers: '/customers/list',
+  frozen: '/customers/frozen',
+  transactions: '/customers/transactions',
+  reports: '/reports/sales',
+  expenses: '/expenses',
+  users: '/users',
+  roles: '/roles',
+  audit: '/audit-log',
+  settings: '/settings/store',
+  branding: '/settings/branding',
+  ai_training: '/settings/ai-training',
+  backup: '/settings/backup',
 };
 
 function hasPerm(user: AuthUser, key: string) {
@@ -48,9 +50,41 @@ function hasPerm(user: AuthUser, key: string) {
 export async function executeTool(name: string, args: Record<string, unknown>, user: AuthUser): Promise<ToolResult> {
   switch (name) {
     case "navigate_to_page": {
-      const key = String(args.route ?? args.page ?? "").toLowerCase();
-      const route = ROUTES[key] ?? (key.startsWith("/") ? key : null);
-      if (!route) return { ok: false, message: `لم يتم العثور على صفحة "${key}".` };
+      const raw = String(args.route ?? args.page ?? args.name ?? "").trim();
+      const key = raw.toLowerCase();
+      const synonyms: Record<string, string> = {
+        "لوحة التحكم": "dashboard", "الرئيسية": "dashboard",
+        "المنتجات": "products", "التصنيفات": "categories", "المخزون": "stock",
+        "قرب الانتهاء": "expiring", "الانتهاء": "expiring", "الصلاحية": "expiring",
+        "نقطة البيع": "pos", "البيع": "pos",
+        "الفواتير": "orders", "الطلبات": "orders",
+        "الموردون": "suppliers", "المورد": "suppliers",
+        "أوامر الشراء": "purchase_orders", "المشتريات": "purchases",
+        "مرتجعات الشراء": "returns",
+        "العملاء": "customers", "الحسابات المجمدة": "frozen", "مجمدة": "frozen",
+        "الآجل": "transactions", "المدفوعات": "transactions",
+        "التقارير": "reports",
+        "المصروفات": "expenses",
+        "المستخدمون": "users", "المستخدم": "users",
+        "الأدوار": "roles", "الصلاحيات": "roles",
+        "سجل التدقيق": "audit", "التدقيق": "audit",
+        "الإعدادات": "settings",
+        "الهوية": "branding", "الهويه": "branding", "هويه": "branding", "هوية": "branding",
+        "مركز تدريب": "ai_training", "training": "ai_training",
+        "النسخ الاحتياطي": "backup", "backup": "backup",
+      };
+      let route: string | null = ROUTES[raw] ?? ROUTES[key] ?? null;
+      if (!route) {
+        const synKey = Object.keys(synonyms).find((k) => key.includes(k) || k.includes(key));
+        if (synKey) route = ROUTES[synonyms[synKey]];
+      }
+      if (!route) {
+        const found = Object.keys(ROUTES).find((k) => k.toLowerCase() === key || key.includes(k.toLowerCase()) || k.toLowerCase().includes(key));
+        if (found) route = ROUTES[found];
+      }
+      if (!route || !route.startsWith("/")) {
+        return { ok: false, message: `لم يتم العثور على صفحة "${raw}".` };
+      }
       return { ok: true, message: `جاري فتح ${route}...`, navigate: route };
     }
     case "search_products": {
