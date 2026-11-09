@@ -35,16 +35,11 @@ export function LoginForm({ t, tErrors, storeName, logoUrl }: Props) {
   });
 
   const loginWithPasskey = async () => {
-    const identity = form.getValues("identity")?.trim();
-    if (!identity) {
-      toast.error("أدخل اسم المستخدم أو البريد أولاً");
-      return;
-    }
     try {
       const optRes = await fetch("/api/auth/passkey/auth/options", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identity }),
+        body: JSON.stringify({}),
       });
       const options = await optRes.json();
       if (!optRes.ok) {

@@ -8,16 +8,16 @@ const ORIGIN = process.env.WEBAUTHN_ORIGIN || "http://localhost:3000";
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
-  const userId = String(body?.userId ?? "");
-  if (!userId) return NextResponse.json({ error: "USER_ID_REQUIRED" }, { status: 400 });
+  let userId = String(body?.userId ?? "");
+  const passkey = await db.passkey.findUnique({ where: { credentialId: body.id } });
+  if (!passkey) return NextResponse.json({ error: "PASSKEY_NOT_FOUND" }, { status: 404 });
+  if (!userId) userId = passkey.userId;
 
   const user = await db.user.findUnique({ where: { id: userId } });
   if (!user || user.deletedAt || user.status !== "ACTIVE") {
     return NextResponse.json({ error: "USER_NOT_FOUND" }, { status: 404 });
   }
-
-  const passkey = await db.passkey.findUnique({ where: { credentialId: body.id } });
-  if (!passkey || passkey.userId !== userId) {
+  if (passkey.userId !== userId) {
     return NextResponse.json({ error: "PASSKEY_NOT_FOUND" }, { status: 404 });
   }
 
