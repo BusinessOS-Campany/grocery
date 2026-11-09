@@ -161,6 +161,7 @@ model User {
   backupRecords       BackupRecord[]
   aiConversations     AIConversation[]
   userPermissions     UserPermission[]
+  passkeys            Passkey[]
 
   @@index([roleId])
   @@index([status])
@@ -1050,6 +1051,37 @@ model AIMessage {
 
   @@index([conversationId, createdAt])
   @@map("ai_messages")
+}
+
+model PasskeyChallenge {
+  id        String   @id @default(uuid())
+  userId    String?
+  challenge String   @unique
+  type      String   // register | authenticate
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId, type])
+  @@map("passkey_challenges")
+}
+
+model Passkey {
+  id              String   @id @default(uuid())
+  userId          String
+  credentialId    String   @unique
+  publicKey       Bytes
+  counter         BigInt   @default(0)
+  transports      String?
+  deviceType      String?
+  backedUp        Boolean  @default(false)
+  name            String?
+  createdAt       DateTime @default(now())
+  lastUsedAt      DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("passkeys")
 }
 
 model BackupRecord {

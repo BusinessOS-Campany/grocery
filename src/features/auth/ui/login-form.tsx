@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import type { Dictionary } from "@/shared/i18n";
 import { loginSchema, type LoginInput } from "../schema";
 import { loginAction } from "../actions";
+import { startAuthentication } from "@simplewebauthn/browser";
 
 interface Props {
   t: Dictionary["auth"];
@@ -32,6 +33,41 @@ export function LoginForm({ t, tErrors, storeName, logoUrl }: Props) {
     resolver: zodResolver(loginSchema),
     defaultValues: { identity: "", password: "", remember: false } as LoginInput,
   });
+
+  const loginWithPasskey = async () => {
+    const identity = form.getValues("identity")?.trim();
+    if (!identity) {
+      toast.error("أدخل اسم المستخدم أو البريد أولاً");
+      return;
+    }
+    try {
+      const optRes = await fetch("/api/auth/passkey/auth/options", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identity }),
+      });
+      const options = await optRes.json();
+      if (!optRes.ok) {
+        toast.error(options?.error ?? "تعذر بدء المصادقة");
+        return;
+      }
+      const authResp = await startAuthentication({ optionsJSON: options });
+      const verifyRes = await fetch("/api/auth/passkey/auth/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...authResp, userId: options.userId }),
+      });
+      const verifyData = await verifyRes.json();
+      if (verifyRes.ok && verifyData?.ok) {
+        router.replace("/dashboard");
+        router.refresh();
+      } else {
+        toast.error(verifyData?.error ?? "فشل تسجيل الدخول");
+      }
+    } catch (e) {
+      toast.error("تم إلغاء المصادقة أو حدث خطأ");
+    }
+  };
 
   const onSubmit = async (values: LoginInput) => {
     const res = await loginAction(values);
@@ -117,6 +153,9 @@ export function LoginForm({ t, tErrors, storeName, logoUrl }: Props) {
             ) : (
               t.signIn
             )}
+          </Button>
+          <Button type="button" variant="outline" className="w-full" onClick={loginWithPasskey}>
+            الدخول بالبصمة
           </Button>
         </form>
       </CardContent>
