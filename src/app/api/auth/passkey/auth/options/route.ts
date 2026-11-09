@@ -5,6 +5,7 @@ import { generateAuthenticationOptions } from "@simplewebauthn/server";
 const RP_ID = process.env.WEBAUTHN_RP_ID || "localhost";
 
 export async function POST(request: NextRequest) {
+  try {
   const body = await request.json().catch(() => ({}));
   const identity = String(body?.identity ?? "").trim().toLowerCase();
 
@@ -38,4 +39,7 @@ export async function POST(request: NextRequest) {
   });
 
   return NextResponse.json({ ...options, userId: user?.id ?? null });
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "SERVER_ERROR" }, { status: 500 });
+  }
 }

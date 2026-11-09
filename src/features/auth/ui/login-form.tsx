@@ -41,9 +41,12 @@ export function LoginForm({ t, tErrors, storeName, logoUrl }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
-      const options = await optRes.json();
-      if (!optRes.ok) {
-        toast.error(options?.error ?? "تعذر بدء المصادقة");
+      const optText = await optRes.text();
+      let options: any = null;
+      try { options = optText ? JSON.parse(optText) : null; } catch { options = null; }
+      if (!optRes.ok || !options) {
+        toast.error(options?.error ?? `تعذر بدء المصادقة (${optRes.status})`);
+        console.error("passkey options failed:", optRes.status, optText);
         return;
       }
       const authResp = await startAuthentication({ optionsJSON: options });
@@ -52,7 +55,9 @@ export function LoginForm({ t, tErrors, storeName, logoUrl }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...authResp, userId: options.userId }),
       });
-      const verifyData = await verifyRes.json();
+      const verifyText = await verifyRes.text();
+      let verifyData: any = null;
+      try { verifyData = verifyText ? JSON.parse(verifyText) : null; } catch { verifyData = null; }
       if (verifyRes.ok && verifyData?.ok) {
         router.replace("/dashboard");
         router.refresh();
