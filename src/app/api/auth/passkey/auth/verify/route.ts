@@ -22,9 +22,13 @@ export async function POST(request: NextRequest) {
   }
 
   const challengeRow = await db.passkeyChallenge.findFirst({
-    where: { userId, type: "authenticate", expiresAt: { gt: new Date() } },
+    where: { userId, type: "authenticate" },
     orderBy: { createdAt: "desc" },
   });
+  if (challengeRow && challengeRow.expiresAt < new Date()) {
+    await db.passkeyChallenge.delete({ where: { id: challengeRow.id } }).catch(() => {});
+    return NextResponse.json({ error: "CHALLENGE_EXPIRED" }, { status: 400 });
+  }
   if (!challengeRow) return NextResponse.json({ error: "NO_CHALLENGE" }, { status: 400 });
 
   let verification;

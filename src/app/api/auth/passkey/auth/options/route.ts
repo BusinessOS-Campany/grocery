@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
       userId: user?.id ?? null,
       challenge: options.challenge,
       type: "authenticate",
-      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
     },
   });
 
