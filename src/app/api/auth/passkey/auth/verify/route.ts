@@ -41,8 +41,9 @@ export async function POST(request: NextRequest) {
         transports: passkey.transports ? (passkey.transports.split(",") as any) : undefined,
       },
     });
-  } catch {
-    return NextResponse.json({ error: "VERIFY_FAILED" }, { status: 400 });
+  } catch (e) {
+    console.error("passkey verify error:", e);
+    return NextResponse.json({ error: "VERIFY_FAILED", detail: e instanceof Error ? e.message : "unknown" }, { status: 400 });
   }
 
   if (!verification.verified) {
