@@ -1,6 +1,7 @@
 import { getT } from "@/shared/i18n";
 import { getSystemSettings } from "@/features/settings/service";
 import { SecuritySettingsForm } from "@/features/settings/ui/settings-forms";
+import { PasskeyManager } from "@/features/auth/ui/passkey-manager";
 
 export default async function SecuritySettingsPage() {
   const { t } = await getT();
@@ -17,6 +18,7 @@ export default async function SecuritySettingsPage() {
           lockoutMinutes: data.lockoutMinutes,
         }}
       />
+      <PasskeyManager />
     </div>
   );
 }
