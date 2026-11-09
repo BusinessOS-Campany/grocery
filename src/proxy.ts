@@ -7,6 +7,8 @@ const PUBLIC_PATHS = [
   "/reset-password",
   "/manifest.webmanifest",
   "/sw.js",
+  "/api/auth/passkey",
+  "/api/auth/expire",
 ];
 
 function isPublic(pathname: string): boolean {
