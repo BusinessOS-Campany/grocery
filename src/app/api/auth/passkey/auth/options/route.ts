@@ -29,10 +29,22 @@ export async function POST(request: NextRequest) {
     userVerification: "preferred",
   });
 
-  // Clean up expired challenges for this user
+  // Delete expired challenges for ALL users first (cleanup)
   await db.passkeyChallenge.deleteMany({
-    where: { userId: user?.id ?? null, expiresAt: { lte: new Date() } },
+    where: { expiresAt: { lte: new Date() } },
   }).catch(() => {});
+
+  const lastChallenge = await db.passkeyChallenge.findFirst({
+    where: { userId, type: "register" },
+    orderBy: { createdAt: "desc" },
+  });
+
+  if (lastChallenge) {
+    // Delete old challenges for this user before creating new one
+    await db.passkeyChallenge.deleteMany({
+      where: { userId, type: "authenticate" },
+    }).catch(() => {});
+  }
 
   await db.passkeyChallenge.create({
     data: {

@@ -29,10 +29,17 @@ export async function POST(request: NextRequest) {
     orderBy: { createdAt: "desc" },
   });
 
-  console.log(`[PASSKEY VERIFY] Found challenge: ${!!challengeRow}, expiresAt=${challengeRow?.expiresAt ? challengeRow.expiresAt.toISOString() : 'N/A'}`);
-
   if (!challengeRow) {
-    console.log("[PASSKEY VERIFY] No valid challenge found - returning CHALLENGE_EXPIRED");
+    // Try without userId filter (for discoverable credentials)
+    challengeRow = await db.passkeyChallenge.findFirst({
+      where: { userId: null, type: "authenticate", expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  console.log(`[PASSKEY VERIFY] Final challenge found: ${!!challengeRow}`);
+  
+  if (!challengeRow) {
     return NextResponse.json({ error: "CHALLENGE_EXPIRED" }, { status: 400 });
   }
 
