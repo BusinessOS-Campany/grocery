@@ -69,6 +69,14 @@ export async function POST(request: NextRequest) {
 
   const confirm = body.confirm === true;
 
+  // Learn from explicit user corrections.
+  const isCorrection = /^(لا|خطأ|تصحيح|ليس)\b/i.test(lastUser.trim()) || /تصحيح|خطأ/i.test(lastUser);
+  if (isCorrection) {
+    const prevAssistant = [...messages].reverse().find((m) => m.role === "assistant")?.content ?? "";
+    await addKnowledge("correction", `User correction: ${lastUser}. Previous AI: ${prevAssistant}`, user.id, true, "user-correction").catch(() => {});
+    return finish("تم حفظ التصحيح في مركز التدريب. سأستخدمه في المحادثات المستقبلية.");
+  }
+
   // --- Direct commands (reliability) ---
   const simpleAdd = /عميل/.test(lastUser) && /(اضف|أريد|add)/i.test(lastUser);
   const simpleName = simpleAdd ? (lastUser.match(/عميل\s+(?:جديد\s+)?(.+?)(?:\s+(?:اريد|مع|بحد|credit|phone|ورقم)|$)/i)?.[1]?.trim() ?? "") : "";
