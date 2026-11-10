@@ -6,12 +6,15 @@ const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 function createClient(): PrismaClient {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL is not set");
+  // Use Supabase's transaction pooler (port 6543) to avoid session-mode
+  // connection exhaustion (max 15 clients) under serverless concurrency.
+  const txUrl = url.replace(/:5432(\/|$)/, ":6543$1");
   // pg does not understand Prisma's ?schema= convention — strip it and pass explicitly.
-  const pgUrl = url.replace(/\?schema=[^&]*$/, "");
+  const pgUrl = txUrl.replace(/\?schema=[^&]*$/, "");
   // Small per-instance pool: on serverless every lambda opens its own pool and
   // Supabase's session-mode pooler only allows ~15 concurrent sessions.
   const adapter = new PrismaPg(
-    { connectionString: pgUrl, max: 3, idleTimeoutMillis: 10_000, connectionTimeoutMillis: 15_000 },
+    { connectionString: pgUrl, max: 5, idleTimeoutMillis: 10_000, connectionTimeoutMillis: 15_000 },
     { schema: "public" },
   );
   return new PrismaClient({ adapter, log: ["warn", "error"] });
