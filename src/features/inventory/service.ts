@@ -113,17 +113,17 @@ async function nextSku(tx: Prisma.TransactionClient): Promise<string> {
   return `SKU-${String(n + 1).padStart(4, "0")}`;
 }
 
-async function assertSkuFree(sku: string, excludeId?: string) {
-  const clash = await db.product.findFirst({
+async function assertSkuFree(tx: Prisma.TransactionClient, sku: string, excludeId?: string) {
+  const clash = await tx.product.findFirst({
     where: { sku, ...(excludeId ? { id: { not: excludeId } } : {}) },
     select: { id: true },
   });
   if (clash) throw new AppError("DUPLICATE", `SKU ${sku} already exists`);
 }
 
-async function assertBarcodeFree(barcode: string | undefined, excludeId?: string) {
+async function assertBarcodeFree(tx: Prisma.TransactionClient, barcode: string | undefined, excludeId?: string) {
   if (!barcode) return;
-  const clash = await db.product.findFirst({
+  const clash = await tx.product.findFirst({
     where: { barcode, ...(excludeId ? { id: { not: excludeId } } : {}) },
     select: { id: true },
   });
@@ -174,8 +174,8 @@ export async function createProduct(userId: string, raw: unknown): Promise<Produ
   }
   return db.$transaction(async (tx) => {
     const sku = input.sku ?? (await nextSku(tx));
-    await assertSkuFree(sku);
-    await assertBarcodeFree(input.barcode);
+    await assertSkuFree(tx, sku);
+    await assertBarcodeFree(tx, input.barcode);
     const unitId = await resolveUnitId(tx, input.unitId);
     const expiry = parseExpiry(input.expiryDate);
     const product = await tx.product.create({
@@ -209,8 +209,8 @@ export async function updateProduct(userId: string, id: string, raw: unknown): P
   if (!existing) throw new AppError("NOT_FOUND", "Product not found");
   return db.$transaction(async (tx) => {
     const sku = input.sku ?? undefined;
-    if (sku) await assertSkuFree(sku, id);
-    await assertBarcodeFree(input.barcode, id);
+    if (sku) await assertSkuFree(tx, sku, id);
+    await assertBarcodeFree(tx, input.barcode, id);
     const expiry = parseExpiry(input.expiryDate);
     await tx.product.update({
       where: { id },

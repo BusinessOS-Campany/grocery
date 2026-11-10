@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
   console.log("[PASSKEY VERIFY] Starting verification...");
   console.log(`[PASSKEY VERIFY] userId=${userId}, passkeyId=${passkey.id}, credentialId=${passkey.credentialId?.substring(0, 20)}...`);
 
-  const challengeRow = await db.passkeyChallenge.findFirst({
+  let challengeRow = await db.passkeyChallenge.findFirst({
     where: { userId, type: "authenticate", expiresAt: { gt: new Date() } },
     orderBy: { createdAt: "desc" },
   });

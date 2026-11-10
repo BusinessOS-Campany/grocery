@@ -35,14 +35,14 @@ export async function POST(request: NextRequest) {
   }).catch(() => {});
 
   const lastChallenge = await db.passkeyChallenge.findFirst({
-    where: { userId, type: "register" },
+    where: { userId: user?.id ?? null, type: "register" },
     orderBy: { createdAt: "desc" },
   });
 
   if (lastChallenge) {
     // Delete old challenges for this user before creating new one
     await db.passkeyChallenge.deleteMany({
-      where: { userId, type: "authenticate" },
+      where: { userId: user?.id ?? null, type: "authenticate" },
     }).catch(() => {});
   }
 

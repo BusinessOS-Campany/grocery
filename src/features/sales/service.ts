@@ -57,7 +57,7 @@ export async function findByBarcode(barcode: string) {
 // ---------------------------------------------------------------------------
 
 async function nextInvoiceNumber(tx: Prisma.TransactionClient): Promise<string> {
-  const settings = await db.systemSettings.findUnique({ where: { id: "system" } });
+  const settings = await tx.systemSettings.findUnique({ where: { id: "system" } });
   const prefix = settings?.invoicePrefix ?? "INV-";
   const last = await tx.sale.findFirst({
     where: { invoiceNumber: { startsWith: prefix } },
@@ -85,7 +85,7 @@ interface SaleLineComputed {
   lineNet: Decimal;
 }
 
-export async function createSale(userId: string, raw: unknown) {
+async function createSaleOnce(userId: string, raw: unknown) {
   const input: CheckoutInput = checkoutSchema.parse(raw);
 
   return db.$transaction(async (tx) => {
@@ -682,4 +682,30 @@ export async function listSales(query: SalesQuery) {
   return { rows, total, page, pageSize };
 }
 
+// ---------------------------------------------------------------------------
+// Transient-error retry wrapper (serialization / connection contention).
+// ---------------------------------------------------------------------------
+function isTransientSaleError(err: unknown): boolean {
+  if (err instanceof AppError) return false;
+  if (typeof err === "object" && err !== null && "issues" in err && Array.isArray((err as { issues: unknown }).issues)) return false;
+  const msg = err instanceof Error ? err.message : String(err);
+  const code = typeof err === "object" && err !== null && "code" in err ? String((err as { code: unknown }).code) : "";
+  return (
+    code === "P2034" || code === "P2028" || code === "P1001" || code === "P1002" ||
+    /serializ|deadlock|could not serialize|unable to start a transaction|connection.*timed out|timeout exceeded/i.test(msg)
+  );
+}
 
+export async function createSale(userId: string, raw: unknown) {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await createSaleOnce(userId, raw);
+    } catch (err) {
+      if (!isTransientSaleError(err)) throw err;
+      lastErr = err;
+      await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+  }
+  throw lastErr;
+}

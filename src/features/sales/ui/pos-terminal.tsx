@@ -214,25 +214,9 @@ export function PosTerminal({ t, locale, products, customers, canDiscount }: Pro
         : payments,
     };
 
-    // Offline (or request failed): queue locally and confirm with a temp receipt.
-    const saveOffline = async () => {
-      await enqueue("SALE", payload);
-      setReceipt({
-        saleId: "",
-        invoiceNumber: `OFF-${String(Date.now()).slice(-6)}`,
-        total: totals.total,
-        paid: Math.min(paid, totals.total),
-        changeDue: 0,
-        credit: totals.creditTotal,
-        offline: true,
-      });
-      setCart([]);
-      setPaidAmount("");
-      setInvoiceDiscount("");
-      toast.success(s.offlineQueued);
-    };
+    // Online-only mode: never queue offline. Require connectivity.
     if (!navigator.onLine) {
-      await saveOffline();
+      toast.error(s.offlineBanner ?? "Online connection required");
       setBusy(false);
       return;
     }
@@ -241,7 +225,7 @@ export function PosTerminal({ t, locale, products, customers, canDiscount }: Pro
     try {
       res = await checkoutAction(payload);
     } catch {
-      await saveOffline();
+      toast.error(t.errors.INTERNAL_ERROR);
       setBusy(false);
       return;
     }

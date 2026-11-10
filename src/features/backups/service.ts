@@ -59,7 +59,7 @@ export async function createBackup(actor: AuthUser, note?: string) {
     const conn = parseDatabaseUrl(dbUrl);
     const exitCode = await new Promise<number>((resolve) => {
       const child = spawn(
-        resolvePgDump(), /*turbopackIgnore: true*/
+        /*turbopackIgnore: true*/ resolvePgDump(),
         ["--host", conn.host, "--port", conn.port, "--username", conn.user,
          "--no-owner", "--no-privileges", "--format=plain", "--file", filePath, conn.database],
         { env: { ...process.env, PGPASSWORD: conn.password }, windowsHide: true },
