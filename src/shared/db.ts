@@ -14,7 +14,7 @@ function createClient(): PrismaClient {
   // Small per-instance pool: on serverless every lambda opens its own pool and
   // Supabase's session-mode pooler only allows ~15 concurrent sessions.
   const adapter = new PrismaPg(
-    { connectionString: pgUrl, max: 5, idleTimeoutMillis: 10_000, connectionTimeoutMillis: 15_000 },
+    { connectionString: pgUrl, max: 20, idleTimeoutMillis: 10_000, connectionTimeoutMillis: 15_000 },
     { schema: "public" },
   );
   return new PrismaClient({ adapter, log: ["warn", "error"] });
