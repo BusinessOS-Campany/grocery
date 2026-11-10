@@ -29,14 +29,14 @@ export function VoiceAssistant() {
     rec.continuous = true;
     rec.interimResults = true;
     rec.onresult = (e: any) => {
-      let finalChunk = "";
+      let finalTranscript = "";
       let interimChunk = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
+      for (let i = 0; i < e.results.length; i++) {
         const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) finalChunk += t;
+        if (e.results[i].isFinal) finalTranscript += t + " ";
         else interimChunk += t;
       }
-      if (finalChunk) setTranscript((prev) => (prev ? prev + " " + finalChunk.trim() : finalChunk.trim()));
+      setTranscript(finalTranscript.trim());
       setInterim(interimChunk);
     };
     rec.onend = () => {

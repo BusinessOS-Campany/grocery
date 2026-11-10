@@ -126,8 +126,8 @@ export function SupportAgent() {
     rec.continuous = false;
     rec.onresult = (e: any) => {
       let transcript = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) transcript += e.results[i][0].transcript;
-      setInput(transcript);
+      for (let i = 0; i < e.results.length; i++) transcript += e.results[i][0].transcript + (e.results[i].isFinal ? " " : "");
+      setInput(transcript.trim());
     };
     rec.onend = () => setListening(false);
     rec.onerror = () => setListening(false);
