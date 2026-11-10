@@ -78,8 +78,8 @@ export async function POST(request: NextRequest) {
   }
 
   // --- Direct commands (reliability) ---
-  const simpleAdd = /عميل/.test(lastUser) && /(اضف|أريد|add)/i.test(lastUser);
-  const simpleName = simpleAdd ? (lastUser.match(/عميل\s+(?:جديد\s+)?(.+?)(?:\s+(?:اريد|مع|بحد|credit|phone|ورقم)|$)/i)?.[1]?.trim() ?? "") : "";
+  const simpleAdd = /عميل/.test(lastUser) && /(اضف|أضف|ضيف|أريد|add)/i.test(lastUser);
+  const simpleName = simpleAdd ? (lastUser.match(/عميل\s+(?:جديد\s+)?(?:باسم|باسم|اسم)?\s*(.+?)(?:\s+(?:اريد|مع|بحد|credit|phone|ورقم|حد|رقم)|$)/i)?.[1]?.trim() ?? "") : "";
   const simpleCredit = simpleAdd ? (lastUser.match(/(?:حد\s*ائتمان|credit\s*limit|حد)\s*(\d[\d,]*)/i)?.[1]?.replace(/,/g, "") ?? "0") : "0";
   const simplePhone = simpleAdd ? (lastUser.match(/(?:ورقمه|phone|رقم)\s*(\d+)/i)?.[1] ?? null) : null;
   if (simpleAdd && simpleName && !/بحد|ورقمه/.test(simpleName)) {
